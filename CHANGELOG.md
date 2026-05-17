@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-17
+
+### Changed
+- `StreamingTypewriterState`'s primary constructor is now **public** — was `internal`,
+  blocking headless construction outside `@Composable` scope. The headless API was
+  always advertised as drivable without composition, but `rememberStreamingTypewriterState`
+  was the only way to obtain an instance. Now you can do
+  `val state = StreamingTypewriterState()` directly from a `ViewModel` / chat-row factory
+  / coroutine / test.
+
+[0.1.1]: https://github.com/NadeemIqbal/llm-typewriter/releases/tag/v0.1.1
+
 ## [0.1.0] - 2026-05-17
 
 ### Added

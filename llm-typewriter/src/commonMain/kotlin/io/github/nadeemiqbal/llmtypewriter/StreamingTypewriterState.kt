@@ -34,7 +34,7 @@ enum class TypewriterPhase {
  * pace dictated by the active [SpeedCurve]. This separation is what lets the typewriter survive
  * recompositions and supports the headless API (no composition required for tests).
  */
-class StreamingTypewriterState internal constructor(
+class StreamingTypewriterState(
     initialBufferSoftCap: Int = LlmTypewriterDefaults.DefaultBufferSoftCap,
 ) {
 
