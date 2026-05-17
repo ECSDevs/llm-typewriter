@@ -14,6 +14,8 @@ friendly live region — on every CMP target.
   <img src="docs/hero.gif" width="320" alt="LlmTypewriter streaming a markdown response with a syntax-highlighted Kotlin code block on iOS" />
 </p>
 
+> **Pairs naturally with [`prompt-bar`](https://github.com/NadeemIqbal/prompt-bar)** — drop both in and you have a ChatGPT-quality chat UI on Android, iOS, Desktop, and Web in ~20 lines. PromptBar's Send/Stop button auto-syncs with `state.isStreaming`.
+
 ## Why another typewriter?
 
 Existing CMP typewriters take a static `String` — they're animations, not stream renderers.
