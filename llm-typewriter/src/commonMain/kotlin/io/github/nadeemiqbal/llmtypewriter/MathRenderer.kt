@@ -14,8 +14,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Mini LaTeX math renderer. Lays out a [MathNode] tree built from a TeX fragment.
@@ -43,8 +49,12 @@ internal fun RenderMath(
         fontSize = scaledFontSize,
         color = styles.textColor,
     )
+    // In display mode, center-align children vertically so a tall BigOperator (stacked Column with
+    // limits) sits centered with the rest of the formula. Without this, Bottom alignment makes the
+    // operator's lower limit the baseline — "大算子的主体和公式其余部分不在同一行".
+    val rowAlignment = if (displayMode) Alignment.CenterVertically else Alignment.Bottom
     CompositionLocalProvider(LocalTextStyle provides mathTextStyle) {
-        Row(modifier = modifier, verticalAlignment = Alignment.Bottom) {
+        Row(modifier = modifier, verticalAlignment = rowAlignment) {
             RenderMathNode(ast, displayMode = displayMode, styles = styles)
         }
     }
@@ -62,8 +72,11 @@ private fun RenderMathNode(node: MathNode, displayMode: Boolean, styles: MathSty
         is MathNode.Number -> Text(text = node.text)
         is MathNode.Symbol -> Text(text = node.glyph)
         is MathNode.Command -> Text(text = "\\${node.name}")
-        is MathNode.Group -> Row(verticalAlignment = Alignment.Bottom) {
-            for (child in node.nodes) RenderMathNode(child, displayMode, styles)
+        is MathNode.Group -> {
+            val groupAlign = if (displayMode) Alignment.CenterVertically else Alignment.Bottom
+            Row(verticalAlignment = groupAlign) {
+                for (child in node.nodes) RenderMathNode(child, displayMode, styles)
+            }
         }
         is MathNode.Space -> Spacer(modifier = spaceWidth(node.width))
         is MathNode.Superscript -> RenderScript(
@@ -91,6 +104,10 @@ private fun RenderMathNode(node: MathNode, displayMode: Boolean, styles: MathSty
  * Implementation: the base is laid out, then a [Box] to its right stacks `sup` (top-aligned,
  * raised) and `sub` (bottom-aligned, dropped) at the **same x** — that's what makes them line up
  * in a single column rather than side-by-side.
+ *
+ * The Box height is set to ~1.3× the base font size so `sup` at [Alignment.TopStart] sits above
+ * the baseline (raised) and `sub` at [Alignment.BottomStart] sits at/below it. Without the
+ * explicit height, the Box wraps its content and `sup` ends up at the baseline — "普通上标位置偏下".
  */
 @Composable
 private fun RenderScript(
@@ -102,10 +119,16 @@ private fun RenderScript(
 ) {
     val baseStyle = LocalTextStyle.current
     val scriptStyle = baseStyle.copy(fontSize = baseStyle.fontSize * ScriptScale)
+    val density = LocalDensity.current
+    // Use .value (Float) to check if the font size is specified — NaN means Unspecified.
+    val resolvedFontSize = baseStyle.fontSize.let { fs ->
+        if (fs.value > 0f) fs else 16.sp
+    }
+    val boxHeight = with(density) { (resolvedFontSize * ScriptBoxHeightScale).toDp() }
     Row(verticalAlignment = Alignment.Bottom) {
         RenderMathNode(base, displayMode, styles)
         if (sub != null || sup != null) {
-            Box {
+            Box(modifier = Modifier.height(boxHeight)) {
                 if (sup != null) {
                     CompositionLocalProvider(LocalTextStyle provides scriptStyle) {
                         // Top-start aligned within the Box, so sup sits at the top.
@@ -212,27 +235,33 @@ private fun RenderBinom(node: MathNode.Binom, displayMode: Boolean, styles: Math
  *  - **Display mode**: the glyph is rendered oversized; `lower` is centered below, `upper`
  *    centered above. This is the "大算子的上下标位置" requirement.
  *  - **Inline mode**: glyph at slightly larger font; scripts render to the side as a column.
+ *
+ * In display mode, tight [TextStyle]s (with [LineHeightStyle.Trim.Both] and
+ * [PlatformTextStyle.includeFontPadding] = false) are applied to the glyph and limits so they sit
+ * close together — without this, the default line-height padding pushes the limits far from the
+ * glyph ("大算子的上下标离主体太远").
  */
 @Composable
 private fun RenderBigOperator(node: MathNode.BigOperator, displayMode: Boolean, styles: MathStyles) {
     val outer = LocalTextStyle.current
     val glyphSize = if (displayMode) outer.fontSize * DisplayOperatorScale else outer.fontSize * InlineOperatorScale
-    val limitStyle = outer.copy(fontSize = outer.fontSize * ScriptScale)
     val hasLimits = node.lower != null || node.upper != null
 
     if (displayMode && hasLimits) {
         // Stacked: upper above glyph, glyph in middle, lower below — all horizontally centered.
         // This is the explicit "大算子的上下标位置" invariant: limits go directly above/below the
         // operator in display mode, not to the side.
+        val tightLimitStyle = tightStyle(outer, outer.fontSize * ScriptScale)
+        val tightGlyphStyle = tightStyle(outer, glyphSize)
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             if (node.upper != null) {
-                CompositionLocalProvider(LocalTextStyle provides limitStyle) {
+                CompositionLocalProvider(LocalTextStyle provides tightLimitStyle) {
                     RenderMathNode(node.upper, displayMode, styles)
                 }
             }
-            Text(text = node.glyph, style = outer.copy(fontSize = glyphSize))
+            Text(text = node.glyph, style = tightGlyphStyle)
             if (node.lower != null) {
-                CompositionLocalProvider(LocalTextStyle provides limitStyle) {
+                CompositionLocalProvider(LocalTextStyle provides tightLimitStyle) {
                     RenderMathNode(node.lower, displayMode, styles)
                 }
             }
@@ -244,12 +273,12 @@ private fun RenderBigOperator(node: MathNode.BigOperator, displayMode: Boolean, 
             if (node.upper != null || node.lower != null) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     if (node.upper != null) {
-                        CompositionLocalProvider(LocalTextStyle provides limitStyle) {
+                        CompositionLocalProvider(LocalTextStyle provides outer.copy(fontSize = outer.fontSize * ScriptScale)) {
                             RenderMathNode(node.upper, displayMode, styles)
                         }
                     }
                     if (node.lower != null) {
-                        CompositionLocalProvider(LocalTextStyle provides limitStyle) {
+                        CompositionLocalProvider(LocalTextStyle provides outer.copy(fontSize = outer.fontSize * ScriptScale)) {
                             RenderMathNode(node.lower, displayMode, styles)
                         }
                     }
@@ -282,6 +311,22 @@ private fun spaceWidth(width: MathNode.SpaceWidth): Modifier = when (width) {
 
 /** Visual tuning constants. Kept here so they're easy to find; not part of the public API. */
 private const val ScriptScale = 0.7f
+private const val ScriptBoxHeightScale = 1.3f
 private const val FracScale = 0.85f
 private const val DisplayOperatorScale = 2.0f
 private const val InlineOperatorScale = 1.2f
+
+/**
+ * Builds a [TextStyle] with [lineHeight] equal to [fontSize] and [LineHeightStyle.Trim.Both] so the
+ * text has no extra top/bottom padding. Used for big-operator limits in display mode so the upper,
+ * glyph, and lower sit close together instead of being pushed apart by default line-height padding.
+ */
+private fun tightStyle(base: TextStyle, fontSize: TextUnit): TextStyle = base.copy(
+    fontSize = fontSize,
+    lineHeight = fontSize,
+    lineHeightStyle = LineHeightStyle(
+        alignment = LineHeightStyle.Alignment.Center,
+        trim = LineHeightStyle.Trim.Both,
+    ),
+    platformStyle = PlatformTextStyle(includeFontPadding = false),
+)

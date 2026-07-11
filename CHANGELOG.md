@@ -31,6 +31,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `androidInstrumentedTest/` — run via `./gradlew :llm-typewriter:connectedAndroidTest`.
 - CI workflows now run on `ubuntu-latest` instead of `macos-latest`.
 
+### Fixed
+- TeX rendering layout bugs reported in the inline-vs-display review:
+  - **Inline math split from surrounding text.** Inline `$…$` math and the markdown text around it
+    were forced onto separate rows because each `InlineMath` token became its own `MdBlock`.
+    Inline runs containing math are now emitted as a single `InlineRunWithMath` block laid out via
+    `FlowRow`, with text pre-split into word-level segments so the row wraps naturally at word
+    boundaries and math sits inline with the surrounding words.
+  - **Superscripts rendered too low.** `RenderScript`'s `Box` wrapped its content, so `sup` at
+    `TopStart` ended up at the baseline. The Box now has an explicit height
+    (`fontSize × ScriptBoxHeightScale`, 1.3×) so `sup` truly sits above the baseline and `sub` sits
+    at/below it.
+  - **Big-operator limits detached from the glyph.** Default line-height padding pushed the
+    stacked `upper`/glyph/`lower` apart. `RenderBigOperator` now applies a tight `TextStyle`
+    (`lineHeight = fontSize`, `LineHeightStyle.Trim.Both`, `includeFontPadding = false`) to the
+    glyph and both limits in display mode so they sit close together.
+  - **Big-operator column misaligned with the rest of the formula.** With `Alignment.Bottom`
+    on the outer `Row`, a tall stacked `BigOperator` had its lower limit on the baseline, making
+    the operator look like a subscript. In display mode the outer `Row` and `Group` `Row` now use
+    `Alignment.CenterVertically` so the operator's glyph aligns with the rest of the formula.
+
 ## [0.1.1] - 2026-05-17
 
 ### Changed

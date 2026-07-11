@@ -1,8 +1,11 @@
 package io.github.nadeemiqbal.llmtypewriter
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,57 +68,117 @@ fun MarkdownTypewriterRenderer(styles: MarkdownStyles): TypewriterRenderer =
  */
 private sealed class MdBlock {
     data class Inline(val annotated: AnnotatedString) : MdBlock()
+    /** Inline run that contains math segments interleaved with text — laid out on a single
+     *  wrapped line via [FlowRow] so math sits inline with surrounding words (not on its own row). */
+    data class InlineRunWithMath(val segments: List<InlineSegment>) : MdBlock()
     data class Heading(val level: Int, val text: String) : MdBlock()
     data class Code(val token: MdToken.CodeBlock) : MdBlock()
-    /** Inline math `$...$` — laid out inline with surrounding text. */
-    data class InlineMath(val content: String) : MdBlock()
     /** Display math `$$...$$` — block-level, centered, with background. */
     data class DisplayMath(val content: String) : MdBlock()
+}
+
+/** A segment within an [MdBlock.InlineRunWithMath] — either styled text or a math fragment. */
+private sealed class InlineSegment {
+    data class Text(val annotated: AnnotatedString) : InlineSegment()
+    data class Math(val content: String) : InlineSegment()
 }
 
 private fun planBlocks(tokens: List<MdToken>, styles: MarkdownStyles): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
     val pending = mutableListOf<MdToken>()
+
+    fun flushPending() {
+        if (pending.isEmpty()) return
+        val hasMath = pending.any { it is MdToken.InlineMath }
+        if (hasMath) {
+            blocks += MdBlock.InlineRunWithMath(buildInlineSegments(pending, styles))
+        } else {
+            blocks += MdBlock.Inline(buildAnnotatedFromInline(pending, styles))
+        }
+        pending.clear()
+    }
+
     for (tok in tokens) {
         when (tok) {
             is MdToken.CodeBlock -> {
-                if (pending.isNotEmpty()) {
-                    blocks += MdBlock.Inline(buildAnnotatedFromInline(pending, styles))
-                    pending.clear()
-                }
+                flushPending()
                 blocks += MdBlock.Code(tok)
             }
             is MdToken.Heading -> {
-                if (pending.isNotEmpty()) {
-                    blocks += MdBlock.Inline(buildAnnotatedFromInline(pending, styles))
-                    pending.clear()
-                }
+                flushPending()
                 blocks += MdBlock.Heading(tok.level, tok.text)
             }
             is MdToken.InlineMath -> {
-                if (pending.isNotEmpty()) {
-                    blocks += MdBlock.Inline(buildAnnotatedFromInline(pending, styles))
-                    pending.clear()
-                }
-                blocks += MdBlock.InlineMath(tok.content)
+                // Don't flush — keep in pending so it renders inline with surrounding text on the
+                // same row, instead of being split onto its own line.
+                pending += tok
             }
             is MdToken.DisplayMath -> {
-                if (pending.isNotEmpty()) {
-                    blocks += MdBlock.Inline(buildAnnotatedFromInline(pending, styles))
-                    pending.clear()
-                }
+                flushPending()
                 blocks += MdBlock.DisplayMath(tok.content)
             }
             MdToken.Newline -> pending += MdToken.Plain("\n")
             else -> pending += tok
         }
     }
-    if (pending.isNotEmpty()) {
-        blocks += MdBlock.Inline(buildAnnotatedFromInline(pending, styles))
-    }
+    flushPending()
     return blocks
 }
 
+/**
+ * Splits a run of inline tokens (which may contain [MdToken.InlineMath] entries) into an ordered
+ * list of [InlineSegment]s. Text between math tokens is split into word-level [InlineSegment.Text]
+ * segments so the [FlowRow] can wrap naturally at word boundaries.
+ */
+private fun buildInlineSegments(tokens: List<MdToken>, styles: MarkdownStyles): List<InlineSegment> {
+    val segments = mutableListOf<InlineSegment>()
+    val textBuffer = mutableListOf<MdToken>()
+
+    fun flushText() {
+        if (textBuffer.isEmpty()) return
+        val annotated = buildAnnotatedFromInline(textBuffer, styles)
+        for (word in splitAnnotatedByWords(annotated)) {
+            segments += InlineSegment.Text(word)
+        }
+        textBuffer.clear()
+    }
+
+    for (tok in tokens) {
+        if (tok is MdToken.InlineMath) {
+            flushText()
+            segments += InlineSegment.Math(tok.content)
+        } else {
+            textBuffer += tok
+        }
+    }
+    flushText()
+    return segments
+}
+
+/**
+ * Splits an [AnnotatedString] into word-level sub-sequences (preserving styles) so each word can
+ * be placed individually in a [FlowRow] cell. Each segment includes trailing whitespace so words
+ * remain separated when laid out in sequence.
+ */
+private fun splitAnnotatedByWords(text: AnnotatedString): List<AnnotatedString> {
+    if (text.length == 0) return listOf(text)
+    val result = mutableListOf<AnnotatedString>()
+    val regex = Regex("\\S+\\s*|\\s+")
+    var lastEnd = 0
+    for (match in regex.findAll(text)) {
+        if (match.range.first > lastEnd) {
+            result += text.subSequence(lastEnd, match.range.first)
+        }
+        result += text.subSequence(match.range.first, match.range.last + 1)
+        lastEnd = match.range.last + 1
+    }
+    if (lastEnd < text.length) {
+        result += text.subSequence(lastEnd, text.length)
+    }
+    return result
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RenderMarkdownStream(
     text: String,
@@ -129,6 +192,7 @@ private fun RenderMarkdownStream(
                 is MdBlock.Inline -> {
                     if (block.annotated.length > 0) Text(text = block.annotated)
                 }
+                is MdBlock.InlineRunWithMath -> RenderInlineRunWithMath(block.segments, styles)
                 is MdBlock.Heading -> {
                     val style = LocalTextStyle.current.copy(
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
@@ -137,8 +201,33 @@ private fun RenderMarkdownStream(
                     Text(text = block.text, style = style)
                 }
                 is MdBlock.Code -> RenderCodeBlock(block.token, styles)
-                is MdBlock.InlineMath -> RenderInlineMath(block.content, styles)
                 is MdBlock.DisplayMath -> RenderDisplayMath(block.content, styles)
+            }
+        }
+    }
+}
+
+/**
+ * Renders an inline run containing math segments interleaved with text. Uses [FlowRow] with
+ * bottom-aligned children so text and math sit on the same baseline. Text is pre-split into
+ * word-level segments (see [splitAnnotatedByWords]) so the [FlowRow] can wrap at word boundaries
+ * — long sentences with embedded math wrap naturally rather than overflowing.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RenderInlineRunWithMath(segments: List<InlineSegment>, styles: MarkdownStyles) {
+    FlowRow(
+        horizontalArrangement = Arrangement.Start,
+        verticalArrangement = Arrangement.spacedBy(0.dp, Alignment.Bottom),
+    ) {
+        for (segment in segments) {
+            when (segment) {
+                is InlineSegment.Text -> {
+                    if (segment.annotated.length > 0) {
+                        Text(text = segment.annotated)
+                    }
+                }
+                is InlineSegment.Math -> RenderInlineMath(segment.content, styles)
             }
         }
     }
