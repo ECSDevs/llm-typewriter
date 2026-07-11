@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLinkStyles
@@ -23,6 +25,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Paints the revealed text of a [StreamingTypewriterState] in some way.
@@ -234,42 +237,53 @@ private fun RenderInlineRunWithMath(segments: List<InlineSegment>, styles: Markd
 }
 
 /**
- * Inline math — parses [content] as TeX, builds the AST, and renders it inline at the current
- * text style. `displayMode = false` keeps the size at the ambient font and uses side-positioned
- * sub/sup for big-operator limits.
+ * Inline math — delegates to [RenderPlatformMath] (AndroidMath's MTMathView on Android) with
+ * `displayMode = false` so the equation renders in text style and sits inline with the
+ * surrounding text. The [content] is the complete LaTeX fragment (the closing `$` has arrived);
+ * before that, the parser emits the partial input as plain text, so this is never called with a
+ * half-formed string.
  */
 @Composable
 private fun RenderInlineMath(content: String, styles: MarkdownStyles) {
-    val ast = remember(content) { buildMathAst(parseTex(content)) }
-    RenderMath(
-        ast = ast,
+    val baseStyle = LocalTextStyle.current
+    val resolvedFontSize = baseStyle.fontSize.let { fs ->
+        if (fs.value > 0f) fs else 16.sp
+    }
+    val textColor = styles.math.color.takeIf { it != Color.Unspecified } ?: LocalContentColor.current
+    RenderPlatformMath(
+        latex = content,
         displayMode = false,
-        styles = styles.mathStyles(),
+        textColor = textColor,
+        fontSize = resolvedFontSize,
     )
 }
 
 /**
  * Display math — block-level, centered, with a background tint. `displayMode = true` bumps the
- * font size by [MarkdownStyles.displayScale] (the "块级 LaTeX 的缩放" requirement) and stacks
- * big-operator limits above/below the glyph.
+ * font size by [MarkdownStyles.displayScale] (the "块级 LaTeX 的缩放" requirement) and renders in
+ * display style so big-operator limits stack above/below the glyph.
  */
 @Composable
 private fun RenderDisplayMath(content: String, styles: MarkdownStyles) {
-    val ast = remember(content) { buildMathAst(parseTex(content)) }
-    val bg = styles.displayMathBackground
-    val mathStyles = styles.mathStyles()
+    val baseStyle = LocalTextStyle.current
+    val resolvedFontSize = baseStyle.fontSize.let { fs ->
+        if (fs.value > 0f) fs else 16.sp
+    }
+    val displayFontSize = resolvedFontSize * styles.displayScale
+    val textColor = styles.math.color.takeIf { it != Color.Unspecified } ?: LocalContentColor.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(bg)
+            .background(styles.displayMathBackground)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
-        RenderMath(
-            ast = ast,
+        RenderPlatformMath(
+            latex = content,
             displayMode = true,
-            styles = mathStyles,
+            textColor = textColor,
+            fontSize = displayFontSize,
             modifier = Modifier.fillMaxWidth(),
         )
     }

@@ -57,15 +57,21 @@ from the tag (`v0.2.0` → `0.2.0`); override locally with `-Pversion=...`.
 | `SpeedCurve.kt` | `Linear` / `EaseOut` / `Natural` reveal cadences. |
 | `TypewriterRenderer.kt` | `TypewriterRenderer` interface + `Plain` + `Markdown` renderers. |
 | `MarkdownStreamParser.kt` | Prefix-stable streaming Markdown parser (includes `$…$` / `$$…$$` math delimiters). |
-| `TexParser.kt` | Prefix-stable lexer for TeX math fragments (`\command`, `{group}`, `^`/`_` scripts, `%comment`). |
-| `MathAst.kt` | Semantic AST built from `TexToken`s — fractions, sqrt, sub/sup, big operators, symbols, delimiters. |
-| `MathRenderer.kt` | Compose renderer for `MathNode` — fractions, roots, same-column scripts, display-mode big-operator limits. |
+| `TexParser.kt` | Prefix-stable lexer for TeX math fragments (`\command`, `{group}`, `^`/`_` scripts, `%comment`). Retained for prefix-stability testing and future programmatic AST use — rendering is now delegated to AndroidMath (see `MathRendering.kt`). |
+| `MathAst.kt` | Semantic AST built from `TexToken`s — fractions, sqrt, sub/sup, big operators, symbols, delimiters. Retained for testing; no longer used by the renderer. |
+| `MathRendering.kt` | `expect` declaration of `RenderPlatformMath` — renders a complete LaTeX fragment via the platform's math backend. |
 | `CodeHighlighter.kt` | Kotlin / JS / TS / Python syntax highlighter. |
-| `MarkdownStyles.kt` | Style record for the Markdown renderer (includes math styles). |
+| `MarkdownStyles.kt` | Style record for the Markdown renderer (math color / display background / display scale). |
 | `Cursor.kt` | `Block` / `Line` / `Underscore` / `None` / `Custom` cursors. |
 | `ThinkingIndicator.kt` | Three pulsing dots. |
 | `LlmTypewriterDefaults.kt` | Defaults — base delay, blink period, theme-derived styles. |
 | `Helpers.kt` | `staticFlowOf`, `wordTokenFlowOf`, internal helpers. |
+
+`llm-typewriter/src/androidMain/kotlin/io/github/nadeemiqbal/llmtypewriter/`:
+
+| File | Responsibility |
+|---|---|
+| `MathRendering.android.kt` | `actual` implementation — delegates to [AndroidMath](https://github.com/gregcockroft/AndroidMath)'s `MTMathView` via `AndroidView`. Renders LaTeX with native Freetype + Latin Modern Math / Tex Gyre Termes / XITS Math fonts. |
 
 Tests:
 - `src/commonTest/` — pure-logic tests (parser, highlighter, state, speed curves, TeX parser, math AST). No Compose runtime.
@@ -81,12 +87,16 @@ Tests:
 - **Headless state first.** `StreamingTypewriterState` is constructable and drivable without
   composition. New behaviour belongs in the state first; composables stay thin wrappers.
 - **No platform code in commonMain.** Speed curves, parsers, highlighter, TeX parser, math AST,
-  and state are pure Kotlin. Platform-specific code belongs in `androidMain`.
+  and state are pure Kotlin. Platform-specific code (including the AndroidMath `MTMathView`
+  binding) belongs in `androidMain`.
 - **Same-column scripts.** `x_a^b` (both scripts on one base) must fold into a single `SubSup`
-  node so the renderer paints sub and sup in the same column — not side-by-side.
+  node in `MathAst`. (Kept for AST correctness testing; visual rendering now handled by AndroidMath.)
 - **Big-operator limits.** Scripts on a `BigOperator` (`\sum`, `\int`, …) fold into `lower`/
-  `upper` fields on the operator itself, not wrapping `Subscript`/`Superscript` nodes — the
-  renderer stacks them above/below the glyph in display mode.
+  `upper` fields on the operator itself in `MathAst`. (Kept for AST correctness testing; visual
+  rendering now handled by AndroidMath.)
+- **Math renders only after the fragment is complete.** `RenderPlatformMath` is called once the
+  closing `$` / `$$` has arrived — never with a half-formed LaTeX string. Before that, the parser
+  emits the partial input as plain text.
 
 ## Conventions
 

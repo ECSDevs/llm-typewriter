@@ -48,6 +48,14 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
 
+        // Android-only target — AndroidMath's MTMathView (native Freetype rendering) lives here.
+        // Resolved from JitPack (see settings.gradle.kts).
+        val androidMain by getting {
+            dependencies {
+                implementation(libs.android.math)
+            }
+        }
+
         // Compose UI tests — Android instrumented tests backed by `compose.uiTest`.
         // Pure-logic tests live in `commonTest` (run as `androidUnitTest`).
         val androidInstrumentedTest by getting {

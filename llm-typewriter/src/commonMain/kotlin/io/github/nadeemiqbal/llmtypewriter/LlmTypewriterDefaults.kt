@@ -52,12 +52,9 @@ object LlmTypewriterDefaults {
         codeBlockComment = MaterialTheme.colorScheme.outline,
         codeBlockNumber = MaterialTheme.colorScheme.secondary,
         math = SpanStyle(
-            fontFamily = FontFamily.Serif,
             color = MaterialTheme.colorScheme.onSurface,
         ),
-        texCommand = MaterialTheme.colorScheme.tertiary,
         displayMathBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-        fractionBarColor = MaterialTheme.colorScheme.onSurface,
         displayScale = 1.2f,
     )
 
@@ -86,10 +83,8 @@ object LlmTypewriterDefaults {
         codeBlockString = tertiary,
         codeBlockComment = outline,
         codeBlockNumber = secondary,
-        math = SpanStyle(fontFamily = FontFamily.Serif),
-        texCommand = tertiary,
+        math = SpanStyle(),
         displayMathBackground = surfaceVariant.copy(alpha = 0.4f),
-        fractionBarColor = onSurfaceVariant,
         displayScale = 1.2f,
     )
 }

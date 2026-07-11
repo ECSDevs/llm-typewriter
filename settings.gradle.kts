@@ -22,6 +22,8 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
+        // AndroidMath (gregcockroft) is published on JitPack, not Maven Central.
+        maven { url = uri("https://jitpack.io") }
     }
 }
 

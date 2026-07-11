@@ -51,6 +51,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the operator look like a subscript. In display mode the outer `Row` and `Group` `Row` now use
     `Alignment.CenterVertically` so the operator's glyph aligns with the rest of the formula.
 
+### Changed (math rendering)
+- **LaTeX rendering is now delegated to [AndroidMath](https://github.com/gregcockroft/AndroidMath)'s
+  `MTMathView`** instead of the in-tree Compose renderer. AndroidMath uses native Freetype to
+  render LaTeX with proper font metrics (Latin Modern Math / Tex Gyre Termes / XITS Math fonts),
+  so fractions, big-operator stacked limits, roots, and the rest of the LaTeX grammar render
+  correctly without us having to re-implement them. The previous `MathRenderer.kt` is deleted.
+  - New `expect`/`actual` split: `MathRendering.kt` (commonMain) declares `RenderPlatformMath`;
+    `MathRendering.android.kt` (androidMain) wraps `MTMathView` via `AndroidView`.
+  - `MTMathView.labelMode` switches between `KMTMathViewModeDisplay` (for `$$…$$`) and
+    `KMTMathViewModeText` (for inline `$…$`).
+  - `MarkdownStyles` drops `texCommand` and `fractionBarColor` (no longer used — AndroidMath owns
+    the fraction bar, vinculum, and command rendering). The `math` field's `color` is honored;
+    other `SpanStyle` properties are ignored because AndroidMath owns the typography.
+  - `MathStyles` data class and `mathStyles()` extension removed.
+- `TexParser` and `MathAst` are retained for prefix-stability testing and future programmatic
+  AST use, but no longer participate in rendering.
+- New dependency: `com.github.gregcockroft:AndroidMath:v1.1.0` via JitPack (added to
+  `settings.gradle.kts`).
+
 ## [0.1.1] - 2026-05-17
 
 ### Changed
