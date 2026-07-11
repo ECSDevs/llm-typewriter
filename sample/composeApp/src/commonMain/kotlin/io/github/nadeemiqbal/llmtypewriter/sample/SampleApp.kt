@@ -107,6 +107,23 @@ private val FakeResponses = listOf(
         the pauses on punctuation feel like a real typist. Notice the slight hesitation here.
         And here. And here!
     """.trimIndent(),
+
+    """
+        ## Math rendering
+
+        Inline math works mid-sentence: the Pythagorean theorem ${'$'}a^2 + b^2 = c^2${'$'} is
+        rendered inline, while display math gets its own block:
+
+        ${'$'}${'$'}\sum_{i=1}^{n} i^2 = \frac{n(n+1)(2n+1)}{6}${'$'}${'$'}
+
+        Sub and superscript line up in the **same column** — ${'$'}x_a^b${'$'} — and big
+        operators stack their limits above and below the glyph in display mode:
+
+        ${'$'}${'$'}\int_0^{\infty} e^{-x^2} dx = \frac{\sqrt{\pi}}{2}${'$'}${'$'}
+
+        Greek letters (${'$'}\alpha${'$'}, ${'$'}\beta${'$'}, ${'$'}\pi${'$'}), roots
+        ${'$'}\sqrt{x^2 + y^2}${'$'}, and fractions all render as they stream in.
+    """.trimIndent(),
 )
 
 @Composable
@@ -130,7 +147,7 @@ private fun DemoScreen() {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            "LlmTypewriter — Compose Multiplatform",
+            "LlmTypewriter — Compose",
             style = MaterialTheme.typography.titleLarge,
         )
         Text(

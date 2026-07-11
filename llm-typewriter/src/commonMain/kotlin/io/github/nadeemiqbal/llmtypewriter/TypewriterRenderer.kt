@@ -1,6 +1,7 @@
 package io.github.nadeemiqbal.llmtypewriter
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -9,6 +10,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.AnnotatedString
@@ -65,6 +67,10 @@ private sealed class MdBlock {
     data class Inline(val annotated: AnnotatedString) : MdBlock()
     data class Heading(val level: Int, val text: String) : MdBlock()
     data class Code(val token: MdToken.CodeBlock) : MdBlock()
+    /** Inline math `$...$` — laid out inline with surrounding text. */
+    data class InlineMath(val content: String) : MdBlock()
+    /** Display math `$$...$$` — block-level, centered, with background. */
+    data class DisplayMath(val content: String) : MdBlock()
 }
 
 private fun planBlocks(tokens: List<MdToken>, styles: MarkdownStyles): List<MdBlock> {
@@ -85,6 +91,20 @@ private fun planBlocks(tokens: List<MdToken>, styles: MarkdownStyles): List<MdBl
                     pending.clear()
                 }
                 blocks += MdBlock.Heading(tok.level, tok.text)
+            }
+            is MdToken.InlineMath -> {
+                if (pending.isNotEmpty()) {
+                    blocks += MdBlock.Inline(buildAnnotatedFromInline(pending, styles))
+                    pending.clear()
+                }
+                blocks += MdBlock.InlineMath(tok.content)
+            }
+            is MdToken.DisplayMath -> {
+                if (pending.isNotEmpty()) {
+                    blocks += MdBlock.Inline(buildAnnotatedFromInline(pending, styles))
+                    pending.clear()
+                }
+                blocks += MdBlock.DisplayMath(tok.content)
             }
             MdToken.Newline -> pending += MdToken.Plain("\n")
             else -> pending += tok
@@ -117,8 +137,52 @@ private fun RenderMarkdownStream(
                     Text(text = block.text, style = style)
                 }
                 is MdBlock.Code -> RenderCodeBlock(block.token, styles)
+                is MdBlock.InlineMath -> RenderInlineMath(block.content, styles)
+                is MdBlock.DisplayMath -> RenderDisplayMath(block.content, styles)
             }
         }
+    }
+}
+
+/**
+ * Inline math — parses [content] as TeX, builds the AST, and renders it inline at the current
+ * text style. `displayMode = false` keeps the size at the ambient font and uses side-positioned
+ * sub/sup for big-operator limits.
+ */
+@Composable
+private fun RenderInlineMath(content: String, styles: MarkdownStyles) {
+    val ast = remember(content) { buildMathAst(parseTex(content)) }
+    RenderMath(
+        ast = ast,
+        displayMode = false,
+        styles = styles.mathStyles(),
+    )
+}
+
+/**
+ * Display math — block-level, centered, with a background tint. `displayMode = true` bumps the
+ * font size by [MarkdownStyles.displayScale] (the "块级 LaTeX 的缩放" requirement) and stacks
+ * big-operator limits above/below the glyph.
+ */
+@Composable
+private fun RenderDisplayMath(content: String, styles: MarkdownStyles) {
+    val ast = remember(content) { buildMathAst(parseTex(content)) }
+    val bg = styles.displayMathBackground
+    val mathStyles = styles.mathStyles()
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(bg)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        RenderMath(
+            ast = ast,
+            displayMode = true,
+            styles = mathStyles,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -145,6 +209,11 @@ internal fun buildAnnotatedFromInline(tokens: List<MdToken>, styles: MarkdownSty
                 ) { append(tok.label) }
                 is MdToken.Heading -> withStyle(styles.heading) { append(tok.text) }
                 is MdToken.CodeBlock, MdToken.Newline -> { /* block-level — handled by the caller */ }
+                // Math tokens are rendered as dedicated blocks by [planBlocks]. They should never
+                // reach this inline-assembly path; if they do, emit raw content so no characters
+                // are silently dropped.
+                is MdToken.InlineMath -> append(tok.content)
+                is MdToken.DisplayMath -> append(tok.content)
             }
         }
     }

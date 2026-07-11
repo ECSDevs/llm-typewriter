@@ -190,4 +190,133 @@ class MarkdownStreamParserTest {
         assertEquals(null, cb.language)
         assertEquals("plain\n", cb.content)
     }
+
+    // --- Math delimiters ---
+
+    @Test
+    fun inlineMath_closed() {
+        val tokens = parseStreamingMarkdown("a \$x^2\$ b")
+        assertEquals(
+            listOf(
+                MdToken.Plain("a "),
+                MdToken.InlineMath("x^2", closed = true),
+                MdToken.Plain(" b"),
+            ),
+            tokens,
+        )
+    }
+
+    @Test
+    fun displayMath_closed() {
+        val tokens = parseStreamingMarkdown("\$\$\\sum_{i=1}^n i^2\$\$")
+        assertEquals(
+            listOf(MdToken.DisplayMath("\\sum_{i=1}^n i^2", closed = true)),
+            tokens,
+        )
+    }
+
+    @Test
+    fun displayMath_priorityOverInline() {
+        // `$$x$$` should be display math, not inline math `$` + `$x$` + `$`.
+        val tokens = parseStreamingMarkdown("\$\$x\$\$")
+        assertEquals(listOf(MdToken.DisplayMath("x", closed = true)), tokens)
+    }
+
+    @Test
+    fun inlineMath_rejectsLeadingSpace() {
+        // `$ word $` — the opening `$` followed by whitespace shouldn't start a math span.
+        val tokens = parseStreamingMarkdown("\$ word \$")
+        // The `$` should be plain text. The closing `$` would be rejected too because of the
+        // preceding whitespace.
+        assertTrue(tokens.all { it is MdToken.Plain })
+    }
+
+    @Test
+    fun inlineMath_rejectsTrailingSpaceBeforeClose() {
+        // `$word $` — closing `$` preceded by whitespace is rejected, so no math span.
+        val tokens = parseStreamingMarkdown("\$word \$")
+        assertTrue(tokens.none { it is MdToken.InlineMath })
+    }
+
+    @Test
+    fun currency_notTreatedAsMath() {
+        // `$5` is currency, not a math opener — but our rule is "no space after $", and `5` is
+        // not whitespace, so this DOES open a math span. The close is the issue: there's no second
+        // `$`. Without a close, the parser emits the `$` as plain text.
+        val tokens = parseStreamingMarkdown("The price is \$5.")
+        assertTrue(tokens.none { it is MdToken.InlineMath })
+    }
+
+    @Test
+    fun unclosedInlineMath_emitsPlain() {
+        val tokens = parseStreamingMarkdown("a \$x")
+        // The unclosed `$` should degrade to plain text.
+        assertTrue(tokens.none { it is MdToken.InlineMath })
+        assertTrue(tokens.any { it is MdToken.Plain && it.text.contains("\$") })
+    }
+
+    @Test
+    fun unclosedDisplayMath_emitsPlain() {
+        val tokens = parseStreamingMarkdown("\$\$\\frac{a}{b}")
+        // The unclosed `$$` should degrade to plain text (mergeAdjacentPlain may fold it into a
+        // following plain run, so we check containment rather than equality).
+        assertTrue(tokens.none { it is MdToken.DisplayMath })
+        assertTrue(tokens.any { it is MdToken.Plain && it.text.contains("\$\$") })
+    }
+
+    @Test
+    fun mathSurroundedByText_parsesCleanly() {
+        val tokens = parseStreamingMarkdown("The formula \$a^2 + b^2 = c^2\$ is Pythagoras.")
+        assertEquals(
+            listOf(
+                MdToken.Plain("The formula "),
+                MdToken.InlineMath("a^2 + b^2 = c^2", closed = true),
+                MdToken.Plain(" is Pythagoras."),
+            ),
+            tokens,
+        )
+    }
+
+    @Test
+    fun displayMath_followedByText() {
+        val tokens = parseStreamingMarkdown("\$\$x = 1\$\$\nThen x is one.")
+        assertEquals(
+            listOf(
+                MdToken.DisplayMath("x = 1", closed = true),
+                MdToken.Newline,
+                MdToken.Plain("Then x is one."),
+            ),
+            tokens,
+        )
+    }
+
+    @Test
+    fun multipleInlineMath_inOneLine() {
+        val tokens = parseStreamingMarkdown("\$a\$ and \$b\$")
+        assertEquals(
+            listOf(
+                MdToken.InlineMath("a", closed = true),
+                MdToken.Plain(" and "),
+                MdToken.InlineMath("b", closed = true),
+            ),
+            tokens,
+        )
+    }
+
+    @Test
+    fun prefixStability_growingInlineMath() {
+        val full = "\$x^2\$"
+        // While the close hasn't arrived, the `$` is plain text. Once the close lands, the whole
+        // thing becomes an InlineMath token. The tokens before the `$` (none in this case) stay
+        // stable.
+        listOf(1, 2, 3, 4).forEach { len ->
+            val toks = parseStreamingMarkdown(full.substring(0, len))
+            // No exception, no math token until the close.
+            if (len < full.length) {
+                assertTrue(toks.none { it is MdToken.InlineMath }, "len=\$len")
+            }
+        }
+        // Closed form.
+        assertEquals(listOf(MdToken.InlineMath("x^2", closed = true)), parseStreamingMarkdown(full))
+    }
 }

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Mini LaTeX math renderer — inline `$…$` and display `$$…$$` math in the streaming Markdown.
+  - `TexParser.kt` — prefix-stable lexer for TeX math fragments (`\command`, `{group}`,
+    `^`/`_` scripts, `%comment`); unclosed groups and dangling scripts degrade to safe text.
+  - `MathAst.kt` — semantic AST with fractions, roots, binomials, big operators, delimiters,
+    150+ symbol commands, and `\mathbb` blackboard-bold mapping. `x_a^b` folds into a single
+    `SubSup` node so sub/sup render in the same column; scripts on `\sum`/`\int`/… fold into
+    `lower`/`upper` limits on the operator itself.
+  - `MathRenderer.kt` — Compose renderer: fractions with bar, `\sqrt` with vinculum, same-column
+    sub/sup, display-mode big-operator limits stacked above/below the glyph, display-math scaling.
+  - `MarkdownStreamParser` now emits `InlineMath` / `DisplayMath` tokens; `$$…$$` takes priority
+    over `$…$`, and inline math rejects whitespace-adjacent delimiters to avoid currency
+    false positives (`$5` stays plain text).
+  - 50+ new unit tests (`TexParserTest`, `MathAstTest`, math cases in `MarkdownStreamParserTest`).
+  - Sample app gains a 4th demo response showcasing streaming math rendering.
+
+### Changed
+- Removed all non-Android platform targets (iOS, Desktop/JVM, Web/wasmJs). The library now
+  targets Android only (`androidTarget`, minSdk 24).
+- Deleted sample modules: `:sample:desktopApp`, `:sample:webApp`, and `sample/iosApp/`.
+- Moved Compose UI tests from `skikoTest/` (Skiko-backed, Desktop+iOS only) to
+  `androidInstrumentedTest/` — run via `./gradlew :llm-typewriter:connectedAndroidTest`.
+- CI workflows now run on `ubuntu-latest` instead of `macos-latest`.
+
 ## [0.1.1] - 2026-05-17
 
 ### Changed

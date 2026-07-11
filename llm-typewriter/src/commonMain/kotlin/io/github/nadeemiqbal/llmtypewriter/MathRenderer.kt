@@ -1,0 +1,287 @@
+package io.github.nadeemiqbal.llmtypewriter
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.unit.dp
+
+/**
+ * Mini LaTeX math renderer. Lays out a [MathNode] tree built from a TeX fragment.
+ *
+ * Layout invariants the user explicitly called out — all enforced here:
+ *  - **上下标同列** ([MathNode.SubSup]): sub and sup are painted in the **same column**
+ *    (one above the other, horizontally aligned), not side-by-side.
+ *  - **大算子的字体大小** ([MathNode.BigOperator]): the operator glyph is rendered larger than
+ *    the surrounding text, especially in display mode.
+ *  - **块级 LaTeX 的缩放**: when [displayMode] is true, the whole fragment is rendered at
+ *    [MathStyles.displayScale] × the base font size, matching LaTeX's display-vs-inline size bump.
+ *  - **大算子的上下标位置** ([MathNode.BigOperator] limits in display mode): `lower` is painted
+ *    below the glyph, `upper` is painted above — both horizontally centered on the glyph.
+ */
+@Composable
+internal fun RenderMath(
+    ast: MathNode,
+    displayMode: Boolean,
+    styles: MathStyles,
+    modifier: Modifier = Modifier,
+) {
+    val base = LocalTextStyle.current
+    val scaledFontSize = if (displayMode) base.fontSize * styles.displayScale else base.fontSize
+    val mathTextStyle = base.copy(
+        fontSize = scaledFontSize,
+        color = styles.textColor,
+    )
+    CompositionLocalProvider(LocalTextStyle provides mathTextStyle) {
+        Row(modifier = modifier, verticalAlignment = Alignment.Bottom) {
+            RenderMathNode(ast, displayMode = displayMode, styles = styles)
+        }
+    }
+}
+
+/** Renders a single [MathNode]. Recurses for compound nodes. */
+@Composable
+private fun RenderMathNode(node: MathNode, displayMode: Boolean, styles: MathStyles) {
+    when (node) {
+        is MathNode.Text -> Text(text = node.text)
+        is MathNode.Identifier -> Text(
+            text = node.char,
+            style = LocalTextStyle.current.copy(fontStyle = FontStyle.Italic),
+        )
+        is MathNode.Number -> Text(text = node.text)
+        is MathNode.Symbol -> Text(text = node.glyph)
+        is MathNode.Command -> Text(text = "\\${node.name}")
+        is MathNode.Group -> Row(verticalAlignment = Alignment.Bottom) {
+            for (child in node.nodes) RenderMathNode(child, displayMode, styles)
+        }
+        is MathNode.Space -> Spacer(modifier = spaceWidth(node.width))
+        is MathNode.Superscript -> RenderScript(
+            base = node.base, sub = null, sup = node.target, displayMode = displayMode, styles = styles,
+        )
+        is MathNode.Subscript -> RenderScript(
+            base = node.base, sub = node.target, sup = null, displayMode = displayMode, styles = styles,
+        )
+        is MathNode.SubSup -> RenderScript(
+            base = node.base, sub = node.sub, sup = node.sup, displayMode = displayMode, styles = styles,
+        )
+        is MathNode.Fraction -> RenderFraction(node, displayMode, styles)
+        is MathNode.Sqrt -> RenderSqrt(node, displayMode, styles)
+        is MathNode.Binom -> RenderBinom(node, displayMode, styles)
+        is MathNode.BigOperator -> RenderBigOperator(node, displayMode, styles)
+        is MathNode.Delimiter -> RenderDelimiter(node, displayMode, styles)
+    }
+}
+
+/**
+ * Lays out `^`/`_` scripts. When both [sub] and [sup] are present, they are placed in the **same
+ * column** (one above the other, horizontally aligned) — the user's "上下标（同时上下标在同一列内）"
+ * requirement. A single script is placed on whichever side it appears.
+ *
+ * Implementation: the base is laid out, then a [Box] to its right stacks `sup` (top-aligned,
+ * raised) and `sub` (bottom-aligned, dropped) at the **same x** — that's what makes them line up
+ * in a single column rather than side-by-side.
+ */
+@Composable
+private fun RenderScript(
+    base: MathNode,
+    sub: MathNode?,
+    sup: MathNode?,
+    displayMode: Boolean,
+    styles: MathStyles,
+) {
+    val baseStyle = LocalTextStyle.current
+    val scriptStyle = baseStyle.copy(fontSize = baseStyle.fontSize * ScriptScale)
+    Row(verticalAlignment = Alignment.Bottom) {
+        RenderMathNode(base, displayMode, styles)
+        if (sub != null || sup != null) {
+            Box {
+                if (sup != null) {
+                    CompositionLocalProvider(LocalTextStyle provides scriptStyle) {
+                        // Top-start aligned within the Box, so sup sits at the top.
+                        Row(modifier = Modifier.align(Alignment.TopStart)) {
+                            RenderMathNode(sup, displayMode, styles)
+                        }
+                    }
+                }
+                if (sub != null) {
+                    CompositionLocalProvider(LocalTextStyle provides scriptStyle) {
+                        // Bottom-start aligned, so sub sits at the bottom — same x as sup.
+                        Row(modifier = Modifier.align(Alignment.BottomStart)) {
+                            RenderMathNode(sub, displayMode, styles)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Vertical fraction with a horizontal bar. Numerator and denominator are centered over each
+ * other; the bar spans the column width (which is the wider of the two). Rendered at a slightly
+ * reduced font size so the fraction as a whole visually matches the surrounding text height.
+ */
+@Composable
+private fun RenderFraction(node: MathNode.Fraction, displayMode: Boolean, styles: MathStyles) {
+    val outer = LocalTextStyle.current
+    val inner = outer.copy(fontSize = outer.fontSize * FracScale)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        CompositionLocalProvider(LocalTextStyle provides inner) {
+            RenderMathNode(node.numerator, displayMode, styles)
+        }
+        Spacer(modifier = Modifier.height(1.dp))
+        // Bar — thin line spanning the column width.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height((outer.fontSize.value / 18f).coerceAtLeast(0.5f).dp)
+                .background(styles.fractionBarColor),
+        )
+        Spacer(modifier = Modifier.height(1.dp))
+        CompositionLocalProvider(LocalTextStyle provides inner) {
+            RenderMathNode(node.denominator, displayMode, styles)
+        }
+    }
+}
+
+/**
+ * Square-root sign with a base. We use the Unicode `√` glyph scaled to roughly the base height,
+ * with a thin overline drawn on top of the base for the vinculum. The optional root index sits
+ * small and to the lower-left of the radical sign for `\sqrt[n]{x}`.
+ */
+@Composable
+private fun RenderSqrt(node: MathNode.Sqrt, displayMode: Boolean, styles: MathStyles) {
+    val outer = LocalTextStyle.current
+    Row(verticalAlignment = Alignment.Bottom) {
+        if (node.index != null) {
+            val indexStyle = outer.copy(fontSize = outer.fontSize * 0.6f)
+            CompositionLocalProvider(LocalTextStyle provides indexStyle) {
+                RenderMathNode(node.index, displayMode, styles)
+            }
+            Spacer(modifier = Modifier.width(1.dp))
+        }
+        Text(
+            text = "√",
+            style = outer.copy(fontSize = outer.fontSize * 1.6f),
+        )
+        Box {
+            RenderMathNode(node.base, displayMode, styles)
+            // Vinculum — thin line over the base width.
+            Spacer(
+                modifier = Modifier
+                    .matchParentSize()
+                    .height((outer.fontSize.value / 16f).coerceAtLeast(0.5f).dp)
+                    .background(styles.fractionBarColor),
+            )
+        }
+    }
+}
+
+/** `\binom{n}{k}` — like a fraction but with no bar and paren delimiters. */
+@Composable
+private fun RenderBinom(node: MathNode.Binom, displayMode: Boolean, styles: MathStyles) {
+    val outer = LocalTextStyle.current
+    val inner = outer.copy(fontSize = outer.fontSize * FracScale)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(text = "(", style = outer)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CompositionLocalProvider(LocalTextStyle provides inner) {
+                RenderMathNode(node.n, displayMode, styles)
+            }
+            CompositionLocalProvider(LocalTextStyle provides inner) {
+                RenderMathNode(node.k, displayMode, styles)
+            }
+        }
+        Text(text = ")", style = outer)
+    }
+}
+
+/**
+ * Large operator with optional limits (`\sum_{i=0}^{n}`, `\int_a^b`, …). Two layout modes:
+ *  - **Display mode**: the glyph is rendered oversized; `lower` is centered below, `upper`
+ *    centered above. This is the "大算子的上下标位置" requirement.
+ *  - **Inline mode**: glyph at slightly larger font; scripts render to the side as a column.
+ */
+@Composable
+private fun RenderBigOperator(node: MathNode.BigOperator, displayMode: Boolean, styles: MathStyles) {
+    val outer = LocalTextStyle.current
+    val glyphSize = if (displayMode) outer.fontSize * DisplayOperatorScale else outer.fontSize * InlineOperatorScale
+    val limitStyle = outer.copy(fontSize = outer.fontSize * ScriptScale)
+    val hasLimits = node.lower != null || node.upper != null
+
+    if (displayMode && hasLimits) {
+        // Stacked: upper above glyph, glyph in middle, lower below — all horizontally centered.
+        // This is the explicit "大算子的上下标位置" invariant: limits go directly above/below the
+        // operator in display mode, not to the side.
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (node.upper != null) {
+                CompositionLocalProvider(LocalTextStyle provides limitStyle) {
+                    RenderMathNode(node.upper, displayMode, styles)
+                }
+            }
+            Text(text = node.glyph, style = outer.copy(fontSize = glyphSize))
+            if (node.lower != null) {
+                CompositionLocalProvider(LocalTextStyle provides limitStyle) {
+                    RenderMathNode(node.lower, displayMode, styles)
+                }
+            }
+        }
+    } else {
+        // Inline mode (or no limits): glyph + side scripts column.
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(text = node.glyph, style = outer.copy(fontSize = glyphSize))
+            if (node.upper != null || node.lower != null) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (node.upper != null) {
+                        CompositionLocalProvider(LocalTextStyle provides limitStyle) {
+                            RenderMathNode(node.upper, displayMode, styles)
+                        }
+                    }
+                    if (node.lower != null) {
+                        CompositionLocalProvider(LocalTextStyle provides limitStyle) {
+                            RenderMathNode(node.lower, displayMode, styles)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** `\left( ... \right)` — content between delimiter glyphs. */
+@Composable
+private fun RenderDelimiter(node: MathNode.Delimiter, displayMode: Boolean, styles: MathStyles) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (node.left.isNotEmpty()) {
+            Text(text = node.left)
+        }
+        RenderMathNode(node.content, displayMode, styles)
+        if (node.right.isNotEmpty()) {
+            Text(text = node.right)
+        }
+    }
+}
+
+private fun spaceWidth(width: MathNode.SpaceWidth): Modifier = when (width) {
+    MathNode.SpaceWidth.Thin -> Modifier.width(2.dp)
+    MathNode.SpaceWidth.Medium -> Modifier.width(4.dp)
+    MathNode.SpaceWidth.Thick -> Modifier.width(6.dp)
+    MathNode.SpaceWidth.Quad -> Modifier.width(12.dp)
+}
+
+/** Visual tuning constants. Kept here so they're easy to find; not part of the public API. */
+private const val ScriptScale = 0.7f
+private const val FracScale = 0.85f
+private const val DisplayOperatorScale = 2.0f
+private const val InlineOperatorScale = 1.2f

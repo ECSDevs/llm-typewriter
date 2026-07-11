@@ -35,8 +35,7 @@ sealed class MdToken {
     /** Newline — emitted as its own token for layout purposes. */
     data object Newline : MdToken()
 
-    /**
-     * A fenced code block. `closed` flips to `true` once the trailing ``` is seen — until then
+    /** A fenced code block. `closed` flips to `true` once the trailing ``` is seen — until then
      * the block is rendering progressively (every new char extends [content]).
      */
     data class CodeBlock(
@@ -44,6 +43,19 @@ sealed class MdToken {
         val content: String,
         val closed: Boolean,
     ) : MdToken()
+
+    /**
+     * Inline math `$...$`. [content] is the raw TeX fragment between the delimiters. [closed] is
+     * `false` while the trailing `$` hasn't arrived yet — the renderer paints [content] as plain
+     * text in that case, then re-classifies to math once the close lands.
+     */
+    data class InlineMath(val content: String, val closed: Boolean) : MdToken()
+
+    /**
+     * Display math `$$...$$` — block-level, renders larger and centered with a background.
+     * [closed] flips to `true` once the closing `$$` arrives.
+     */
+    data class DisplayMath(val content: String, val closed: Boolean) : MdToken()
 }
 
 /**
@@ -114,6 +126,42 @@ internal fun parseStreamingMarkdown(input: String): List<MdToken> {
                 i = len
                 continue
             }
+        }
+
+        // Math delimiters — `$$...$$` (display) takes priority over `$...$` (inline). The inline
+        // form requires no space immediately after the opening `$` or before the closing `$` so
+        // that currency like `$5` doesn't false-positive into a math span. Unclosed delimiters
+        // degrade to plain text (prefix-stable: the trailing plain run re-classifies to a math
+        // token once the close arrives).
+        if (c == '$') {
+            val isDisplay = i + 1 < len && input[i + 1] == '$'
+            if (isDisplay) {
+                val close = findDoubleDollar(input, i + 2)
+                if (close >= 0) {
+                    out += MdToken.DisplayMath(input.substring(i + 2, close), closed = true)
+                    i = close + 2
+                    continue
+                }
+                // Unclosed `$$...` — emit `$$` as plain and reparse the rest at top level so we
+                // don't swallow everything as a giant unclosed block.
+                out += MdToken.Plain("$$")
+                i += 2
+                continue
+            }
+            // Inline `$...$`. Reject if next char is a space (e.g. "$ word") — that's almost
+            // certainly currency or stray punctuation, not a math opener.
+            if (i + 1 < len && !input[i + 1].isWhitespace()) {
+                val close = findInlineDollar(input, i + 1)
+                if (close > i + 1) {
+                    out += MdToken.InlineMath(input.substring(i + 1, close), closed = true)
+                    i = close + 1
+                    continue
+                }
+            }
+            // No close (or empty content) — emit `$` as plain and continue.
+            out += MdToken.Plain("$")
+            i++
+            continue
         }
 
         // Order matters: triple-star before double, double before single.
@@ -189,7 +237,7 @@ private fun nextSpecial(s: String, from: Int): Int {
     var j = from
     while (j < s.length) {
         val c = s[j]
-        if (c == '\n' || c == '`' || c == '*' || c == '_' || c == '~' || c == '[' || c == '#') break
+        if (c == '\n' || c == '`' || c == '*' || c == '_' || c == '~' || c == '[' || c == '#' || c == '$') break
         j++
     }
     return j
@@ -280,4 +328,43 @@ private fun mergeAdjacentPlain(input: List<MdToken>): List<MdToken> {
         }
     }
     return out
+}
+
+/**
+ * Finds the closing `$$` for a display-math span that starts at [from] (i.e. just past the
+ * opening `$$`). Skips escaped `\$$` sequences. Returns -1 if no close is present.
+ */
+private fun findDoubleDollar(input: String, from: Int): Int {
+    var j = from
+    val len = input.length
+    while (j + 1 < len) {
+        if (input[j] == '\\' && j + 1 < len) { j += 2; continue }
+        if (input[j] == '$' && input[j + 1] == '$') return j
+        j++
+    }
+    return -1
+}
+
+/**
+ * Finds the closing `$` for an inline-math span. Starts at [from] (the first char after the
+ * opening `$`). Rejects whitespace-immediately-before candidates — the close must not be
+ * preceded by whitespace, and it must not be a `$$` (which is display math). Returns -1 if no
+ * valid close is present.
+ */
+private fun findInlineDollar(input: String, from: Int): Int {
+    var j = from
+    val len = input.length
+    while (j < len) {
+        val c = input[j]
+        if (c == '\\' && j + 1 < len) { j += 2; continue }
+        if (c == '$') {
+            // Reject `$$` — that's display math, not an inline close.
+            if (j + 1 < len && input[j + 1] == '$') return -1
+            // Reject if the previous char is whitespace — `$ word $` is not a math span.
+            if (j > 0 && input[j - 1].isWhitespace()) return -1
+            return j
+        }
+        j++
+    }
+    return -1
 }

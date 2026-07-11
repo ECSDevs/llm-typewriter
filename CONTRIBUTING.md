@@ -6,7 +6,7 @@ bug reports, feature requests, docs, and code.
 ## Project layout
 
 ```
-llm-typewriter/                  The published Kotlin Multiplatform library.
+llm-typewriter/                  The published library.
   src/commonMain/                 Public API + implementation.
     StreamingTypewriter.kt        Composables (StreamingTypewriter / TypewriterText / Cycling).
     StreamingTypewriterState.kt   Phase machine + reveal buffer + state container.
@@ -20,22 +20,18 @@ llm-typewriter/                  The published Kotlin Multiplatform library.
     LlmTypewriterDefaults.kt      Defaults — base delay, blink period, theme-derived styles.
     Helpers.kt                    staticFlowOf, wordTokenFlowOf, internal helpers.
   src/commonTest/                 Pure-logic tests (parser, highlighter, state, speed curves).
-  src/skikoTest/                  Compose UI tests — run on Desktop and iOS test targets.
+  src/androidInstrumentedTest/    Compose UI tests — run on Android device/emulator.
 sample/composeApp/                Shared fake-LLM sample with markdown + code-block demo.
 sample/androidApp/                Android launcher.
-sample/desktopApp/                Desktop (JVM) launcher.
-sample/webApp/                    Web (wasmJs) launcher.
-sample/iosApp/                    iOS launcher (Xcode project).
 ```
 
 ## Building & testing
 
 ```bash
 ./gradlew build                                  # build + test everything
-./gradlew allTests                               # run tests on all targets
-./gradlew :llm-typewriter:desktopTest            # fastest feedback (commonTest + skikoTest)
-./gradlew :llm-typewriter:testDebugUnitTest      # Android unit tests
-./gradlew :sample:desktopApp:run                 # run the desktop sample
+./gradlew :llm-typewriter:testDebugUnitTest      # fastest feedback — pure-logic unit tests
+./gradlew :llm-typewriter:connectedAndroidTest   # Compose UI instrumented tests
+./gradlew :sample:androidApp:assembleDebug        # build the Android sample
 ```
 
 The streaming-markdown parser and code highlighter are pure-logic — keep them that way so any
@@ -50,7 +46,7 @@ parser change can be unit-tested without spinning up the Compose runtime. UI tes
 - **Headless state.** `StreamingTypewriterState` is constructable + drivable without composition.
   Any new behaviour belongs there first; the composables should be thin wrappers.
 - **No platform reach-arounds in commonMain.** Speed curves, parsers, highlighter, state — all
-  pure Kotlin. Anything platform-specific belongs in `iosMain` / `androidMain` / etc.
+  pure Kotlin. Anything platform-specific belongs in `androidMain`.
 
 ## Conventions
 

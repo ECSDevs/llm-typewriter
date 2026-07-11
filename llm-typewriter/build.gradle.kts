@@ -1,6 +1,5 @@
 import org.jetbrains.compose.ExperimentalComposeLibrary
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
-import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -35,23 +34,6 @@ kotlin {
         }
     }
 
-    jvm("desktop") {
-        compilations.all {
-            compileTaskProvider.configure {
-                compilerOptions { jvmTarget.set(JvmTarget.JVM_11) }
-            }
-        }
-    }
-
-    iosX64()
-    iosArm64()
-    iosSimulatorArm64()
-
-    @OptIn(ExperimentalWasmDsl::class)
-    wasmJs {
-        browser()
-    }
-
     sourceSets {
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -66,25 +48,13 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
 
-        val desktopMain by getting {
-            dependencies {
-                implementation(compose.desktop.currentOs)
-            }
-        }
-
-        // Compose UI tests use `compose.uiTest` (Skiko-backed) which has no Android plain-JVM
-        // unit-test implementation. Keeping them in a dedicated `skikoTest` source set — wired
-        // only into Desktop and iOS test targets — lets `androidUnitTest` (which inherits
-        // `commonTest`) keep compiling. Pure-logic tests live in `commonTest`.
-        val skikoTest by creating {
-            dependsOn(commonTest.get())
+        // Compose UI tests — Android instrumented tests backed by `compose.uiTest`.
+        // Pure-logic tests live in `commonTest` (run as `androidUnitTest`).
+        val androidInstrumentedTest by getting {
             dependencies {
                 @OptIn(ExperimentalComposeLibrary::class)
                 implementation(compose.uiTest)
             }
-        }
-        listOf("desktopTest", "iosX64Test", "iosArm64Test", "iosSimulatorArm64Test").forEach { name ->
-            named(name) { dependsOn(skikoTest) }
         }
     }
 }
@@ -94,18 +64,13 @@ android {
     compileSdk = libs.versions.compileSdk.get().toInt()
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInt()
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
 }
-
-// Wasm is verified compile-only. The wasm test bundle transitively pulls in Skiko (via Compose
-// UI), which cannot load under Node, and the browser runner needs a local Chrome install. The
-// pure-logic tests and Compose UI tests run on the Desktop, Android and iOS targets instead.
-tasks.matching { it.name == "wasmJsBrowserTest" || it.name == "wasmJsNodeTest" }
-    .configureEach { enabled = false }
 
 mavenPublishing {
     publishToMavenCentral()
@@ -122,7 +87,7 @@ mavenPublishing {
     pom {
         name.set("LlmTypewriter")
         description.set(
-            "Streaming-text typewriter composable for LLM apps on Compose Multiplatform — " +
+            "Streaming-text typewriter composable for LLM apps on Compose — " +
                 "renders a Flow<String> token stream with live progressive Markdown, " +
                 "syntax-highlighted code blocks that build up as tokens arrive, a configurable " +
                 "blinking cursor, three speed curves (linear/easeOut/natural), tap-to-skip, " +

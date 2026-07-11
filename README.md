@@ -1,20 +1,20 @@
 # LlmTypewriter
 
-**The streaming-text typewriter built for LLM apps on Compose Multiplatform.** Renders a
+**The streaming-text typewriter built for LLM apps on Compose.** Renders a
 `Flow<String>` of tokens with live progressive Markdown, syntax-highlighted code blocks that
 build up as tokens arrive, three speed curves (linear / ease-out / natural), a configurable
 blinking cursor, tap-to-skip, graceful stop-mid-stream, selectable text, and a screen-reader-
-friendly live region — on every CMP target.
+friendly live region.
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.nadeemiqbal/llm-typewriter)](https://central.sonatype.com/artifact/io.github.nadeemiqbal/llm-typewriter)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Build](https://github.com/NadeemIqbal/llm-typewriter/actions/workflows/build.yml/badge.svg)](https://github.com/NadeemIqbal/llm-typewriter/actions/workflows/build.yml)
 
 <p align="center">
-  <img src="docs/hero.gif" width="320" alt="LlmTypewriter streaming a markdown response with a syntax-highlighted Kotlin code block on iOS" />
+  <img src="docs/hero.gif" width="320" alt="LlmTypewriter streaming a markdown response with a syntax-highlighted Kotlin code block on Android" />
 </p>
 
-> **Pairs naturally with [`prompt-bar`](https://github.com/NadeemIqbal/prompt-bar)** — drop both in and you have a ChatGPT-quality chat UI on Android, iOS, Desktop, and Web in ~20 lines. PromptBar's Send/Stop button auto-syncs with `state.isStreaming`.
+> **Pairs naturally with [`prompt-bar`](https://github.com/NadeemIqbal/prompt-bar)** — drop both in and you have a ChatGPT-quality chat UI on Android in ~20 lines. PromptBar's Send/Stop button auto-syncs with `state.isStreaming`.
 
 ## Why another typewriter?
 
@@ -33,7 +33,7 @@ shipped:
 | Custom `@Composable` cursor | ✅ | ❌ | ❌ no cursor | ❌ |
 | Selectable text mid-stream | ✅ | ❌ | ❌ | partial |
 | A11y live-region announcements | ✅ | ❌ | ❌ | partial |
-| CMP target coverage | Android · iOS · Desktop · Wasm | Mostly | Mostly | **Android-only** |
+| CMP target coverage | Android | Mostly | Mostly | **Android-only** |
 | Active maintenance | ✅ | ❌ stale ~2y | ⚠️ alpha | locked in chat SDK |
 
 ## Install
@@ -68,7 +68,7 @@ fun ChatBubble(chatViewModel: ChatViewModel) {
 
 ```kotlin
 TypewriterText(
-    text = "Build LLM-powered apps for Android, iOS, Desktop, and Web.",
+    text = "Build LLM-powered apps for Android.",
     cursor = TypewriterCursor.Block,
     speedCurve = SpeedCurve.Natural,
 )
@@ -118,9 +118,6 @@ Code fences highlight progressively as tokens stream in — no waiting for the c
 | Target | Status |
 |---|---|
 | Android (minSdk 24) | ✅ |
-| iOS (x64, arm64, simulatorArm64) | ✅ |
-| Desktop (JVM 11) | ✅ |
-| Web (wasmJs) | ✅ |
 
 ## State API (headless)
 
@@ -141,9 +138,7 @@ state.reset()          // start fresh
 ## Sample app
 
 ```bash
-./gradlew :sample:desktopApp:run                 # Desktop
 ./gradlew :sample:androidApp:assembleDebug       # Android
-./gradlew :sample:webApp:wasmJsBrowserDevelopmentRun   # Web
 ```
 
 The sample includes a fake-LLM that streams pre-canned responses with Markdown + code blocks, a

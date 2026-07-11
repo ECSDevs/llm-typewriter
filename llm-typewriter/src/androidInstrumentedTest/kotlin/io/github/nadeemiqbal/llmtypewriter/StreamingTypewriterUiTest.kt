@@ -15,7 +15,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Compose UI tests for [StreamingTypewriter]. Skiko-backed — runs on Desktop + iOS test targets.
+ * Compose UI tests for [StreamingTypewriter]. Android instrumented tests backed by `compose.uiTest`.
  *
  * The reveal loop is driven by `LaunchedEffect`, which advances when the runtime's test clock
  * advances. We use the state's direct API (`appendToken` / `skipToEnd`) to make assertions about
@@ -157,4 +157,3 @@ class StreamingTypewriterUiTest {
         onNodeWithTag("llm_typewriter_cycling", useUnmergedTree = true).assertIsDisplayed()
     }
 }
-
