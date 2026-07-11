@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
@@ -17,7 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -45,9 +46,12 @@ internal fun RenderMath(
 ) {
     val base = LocalTextStyle.current
     val scaledFontSize = if (displayMode) base.fontSize * styles.displayScale else base.fontSize
-    val mathTextStyle = base.copy(
-        fontSize = scaledFontSize,
+    // Tight style (lineHeight = fontSize, Trim.Both, no font padding) keeps math compact so lines
+    // with inline math don't end up taller than surrounding text ("行内 LaTeX 行距太远").
+    // Serif font matches LaTeX tradition / 思源宋体 ("LaTeX 用思源宋体").
+    val mathTextStyle = tightStyle(base, scaledFontSize).copy(
         color = styles.textColor,
+        fontFamily = FontFamily.Serif,
     )
     // In display mode, center-align children vertically so a tall BigOperator (stacked Column with
     // limits) sits centered with the rest of the formula. Without this, Bottom alignment makes the
@@ -65,10 +69,7 @@ internal fun RenderMath(
 private fun RenderMathNode(node: MathNode, displayMode: Boolean, styles: MathStyles) {
     when (node) {
         is MathNode.Text -> Text(text = node.text)
-        is MathNode.Identifier -> Text(
-            text = node.char,
-            style = LocalTextStyle.current.copy(fontStyle = FontStyle.Italic),
-        )
+        is MathNode.Identifier -> Text(text = node.char)
         is MathNode.Number -> Text(text = node.text)
         is MathNode.Symbol -> Text(text = node.glyph)
         is MathNode.Command -> Text(text = "\\${node.name}")
@@ -99,15 +100,13 @@ private fun RenderMathNode(node: MathNode, displayMode: Boolean, styles: MathSty
 /**
  * Lays out `^`/`_` scripts. When both [sub] and [sup] are present, they are placed in the **same
  * column** (one above the other, horizontally aligned) — the user's "上下标（同时上下标在同一列内）"
- * requirement. A single script is placed on whichever side it appears.
+ * requirement.
  *
- * Implementation: the base is laid out, then a [Box] to its right stacks `sup` (top-aligned,
- * raised) and `sub` (bottom-aligned, dropped) at the **same x** — that's what makes them line up
- * in a single column rather than side-by-side.
- *
- * The Box height is set to ~1.3× the base font size so `sup` at [Alignment.TopStart] sits above
- * the baseline (raised) and `sub` at [Alignment.BottomStart] sits at/below it. Without the
- * explicit height, the Box wraps its content and `sup` ends up at the baseline — "普通上标位置偏下".
+ * Positioning uses [Modifier.offset] instead of a fixed-height [Box]: sup is raised by
+ * ~[SupRaiseScale]×fontSize above the baseline, sub is dropped by ~[SubDropScale]×fontSize below.
+ * This avoids the "上标现在都快成下标了" issue caused by Box wrapping — with offset, the Row height
+ * stays equal to the base text height so lines with inline math don't end up taller than
+ * surrounding text ("行内 LaTeX 行距太远").
  */
 @Composable
 private fun RenderScript(
@@ -118,31 +117,37 @@ private fun RenderScript(
     styles: MathStyles,
 ) {
     val baseStyle = LocalTextStyle.current
-    val scriptStyle = baseStyle.copy(fontSize = baseStyle.fontSize * ScriptScale)
+    val scriptStyle = tightStyle(baseStyle, baseStyle.fontSize * ScriptScale)
     val density = LocalDensity.current
-    // Use .value (Float) to check if the font size is specified — NaN means Unspecified.
     val resolvedFontSize = baseStyle.fontSize.let { fs ->
         if (fs.value > 0f) fs else 16.sp
     }
-    val boxHeight = with(density) { (resolvedFontSize * ScriptBoxHeightScale).toDp() }
+    val supRaise = with(density) { (resolvedFontSize * SupRaiseScale).toDp() }
+    val subDrop = with(density) { (resolvedFontSize * SubDropScale).toDp() }
+
     Row(verticalAlignment = Alignment.Bottom) {
         RenderMathNode(base, displayMode, styles)
-        if (sub != null || sup != null) {
-            Box(modifier = Modifier.height(boxHeight)) {
-                if (sup != null) {
-                    CompositionLocalProvider(LocalTextStyle provides scriptStyle) {
-                        // Top-start aligned within the Box, so sup sits at the top.
-                        Row(modifier = Modifier.align(Alignment.TopStart)) {
-                            RenderMathNode(sup, displayMode, styles)
-                        }
-                    }
+        if (sup != null && sub == null) {
+            CompositionLocalProvider(LocalTextStyle provides scriptStyle) {
+                Box(modifier = Modifier.offset(y = -supRaise)) {
+                    RenderMathNode(sup, displayMode, styles)
                 }
-                if (sub != null) {
-                    CompositionLocalProvider(LocalTextStyle provides scriptStyle) {
-                        // Bottom-start aligned, so sub sits at the bottom — same x as sup.
-                        Row(modifier = Modifier.align(Alignment.BottomStart)) {
-                            RenderMathNode(sub, displayMode, styles)
-                        }
+            }
+        } else if (sub != null && sup == null) {
+            CompositionLocalProvider(LocalTextStyle provides scriptStyle) {
+                Box(modifier = Modifier.offset(y = subDrop)) {
+                    RenderMathNode(sub, displayMode, styles)
+                }
+            }
+        } else if (sup != null && sub != null) {
+            // Both scripts in the same column (same x) — sup stacked above sub.
+            CompositionLocalProvider(LocalTextStyle provides scriptStyle) {
+                Box {
+                    Box(modifier = Modifier.align(Alignment.TopStart).offset(y = -supRaise)) {
+                        RenderMathNode(sup, displayMode, styles)
+                    }
+                    Box(modifier = Modifier.align(Alignment.BottomStart).offset(y = subDrop)) {
+                        RenderMathNode(sub, displayMode, styles)
                     }
                 }
             }
@@ -158,7 +163,7 @@ private fun RenderScript(
 @Composable
 private fun RenderFraction(node: MathNode.Fraction, displayMode: Boolean, styles: MathStyles) {
     val outer = LocalTextStyle.current
-    val inner = outer.copy(fontSize = outer.fontSize * FracScale)
+    val inner = tightStyle(outer, outer.fontSize * FracScale)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         CompositionLocalProvider(LocalTextStyle provides inner) {
             RenderMathNode(node.numerator, displayMode, styles)
@@ -188,7 +193,7 @@ private fun RenderSqrt(node: MathNode.Sqrt, displayMode: Boolean, styles: MathSt
     val outer = LocalTextStyle.current
     Row(verticalAlignment = Alignment.Bottom) {
         if (node.index != null) {
-            val indexStyle = outer.copy(fontSize = outer.fontSize * 0.6f)
+            val indexStyle = tightStyle(outer, outer.fontSize * 0.6f)
             CompositionLocalProvider(LocalTextStyle provides indexStyle) {
                 RenderMathNode(node.index, displayMode, styles)
             }
@@ -196,7 +201,7 @@ private fun RenderSqrt(node: MathNode.Sqrt, displayMode: Boolean, styles: MathSt
         }
         Text(
             text = "√",
-            style = outer.copy(fontSize = outer.fontSize * 1.6f),
+            style = tightStyle(outer, outer.fontSize * 1.6f),
         )
         Box {
             RenderMathNode(node.base, displayMode, styles)
@@ -215,7 +220,7 @@ private fun RenderSqrt(node: MathNode.Sqrt, displayMode: Boolean, styles: MathSt
 @Composable
 private fun RenderBinom(node: MathNode.Binom, displayMode: Boolean, styles: MathStyles) {
     val outer = LocalTextStyle.current
-    val inner = outer.copy(fontSize = outer.fontSize * FracScale)
+    val inner = tightStyle(outer, outer.fontSize * FracScale)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(text = "(", style = outer)
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -269,16 +274,16 @@ private fun RenderBigOperator(node: MathNode.BigOperator, displayMode: Boolean, 
     } else {
         // Inline mode (or no limits): glyph + side scripts column.
         Row(verticalAlignment = Alignment.Bottom) {
-            Text(text = node.glyph, style = outer.copy(fontSize = glyphSize))
+            Text(text = node.glyph, style = tightStyle(outer, glyphSize))
             if (node.upper != null || node.lower != null) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     if (node.upper != null) {
-                        CompositionLocalProvider(LocalTextStyle provides outer.copy(fontSize = outer.fontSize * ScriptScale)) {
+                        CompositionLocalProvider(LocalTextStyle provides tightStyle(outer, outer.fontSize * ScriptScale)) {
                             RenderMathNode(node.upper, displayMode, styles)
                         }
                     }
                     if (node.lower != null) {
-                        CompositionLocalProvider(LocalTextStyle provides outer.copy(fontSize = outer.fontSize * ScriptScale)) {
+                        CompositionLocalProvider(LocalTextStyle provides tightStyle(outer, outer.fontSize * ScriptScale)) {
                             RenderMathNode(node.lower, displayMode, styles)
                         }
                     }
@@ -311,7 +316,8 @@ private fun spaceWidth(width: MathNode.SpaceWidth): Modifier = when (width) {
 
 /** Visual tuning constants. Kept here so they're easy to find; not part of the public API. */
 private const val ScriptScale = 0.7f
-private const val ScriptBoxHeightScale = 1.3f
+private const val SupRaiseScale = 0.5f
+private const val SubDropScale = 0.2f
 private const val FracScale = 0.85f
 private const val DisplayOperatorScale = 2.0f
 private const val InlineOperatorScale = 1.2f

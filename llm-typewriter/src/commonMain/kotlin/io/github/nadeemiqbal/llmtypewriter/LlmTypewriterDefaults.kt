@@ -52,7 +52,7 @@ object LlmTypewriterDefaults {
         codeBlockComment = MaterialTheme.colorScheme.outline,
         codeBlockNumber = MaterialTheme.colorScheme.secondary,
         math = SpanStyle(
-            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+            fontFamily = FontFamily.Serif,
             color = MaterialTheme.colorScheme.onSurface,
         ),
         texCommand = MaterialTheme.colorScheme.tertiary,
@@ -86,7 +86,7 @@ object LlmTypewriterDefaults {
         codeBlockString = tertiary,
         codeBlockComment = outline,
         codeBlockNumber = secondary,
-        math = SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
+        math = SpanStyle(fontFamily = FontFamily.Serif),
         texCommand = tertiary,
         displayMathBackground = surfaceVariant.copy(alpha = 0.4f),
         fractionBarColor = onSurfaceVariant,

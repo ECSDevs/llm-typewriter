@@ -24,7 +24,7 @@ data class MarkdownStyles(
     val codeBlockString: Color,
     val codeBlockComment: Color,
     val codeBlockNumber: Color,
-    /** Style for math fragments (`$...$` inline, `$$...$$` display). Defaults to italic. */
+    /** Style for math fragments (`$...$` inline, `$$...$$` display). Defaults to serif. */
     val math: SpanStyle = SpanStyle(),
     /** Color for TeX command names when rendered as fallback text. */
     val texCommand: Color = Color.Unspecified,
