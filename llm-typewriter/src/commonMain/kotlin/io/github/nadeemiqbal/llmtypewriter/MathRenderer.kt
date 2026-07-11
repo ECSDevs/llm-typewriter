@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
@@ -45,7 +47,12 @@ internal fun RenderMath(
     modifier: Modifier = Modifier,
 ) {
     val base = LocalTextStyle.current
-    val scaledFontSize = if (displayMode) base.fontSize * styles.displayScale else base.fontSize
+    // Resolve Unspecified fontSize to 16sp — downstream code (sqrt vinculum, fraction bar, script
+    // offsets) reads fontSize.value as a Float and NaN would break layout measurements.
+    val resolvedBaseFontSize = base.fontSize.let { fs ->
+        if (fs.value > 0f) fs else 16.sp
+    }
+    val scaledFontSize = if (displayMode) resolvedBaseFontSize * styles.displayScale else resolvedBaseFontSize
     // Tight style (lineHeight = fontSize, Trim.Both, no font padding) keeps math compact so lines
     // with inline math don't end up taller than surrounding text ("行内 LaTeX 行距太远").
     // Serif font matches LaTeX tradition / 思源宋体 ("LaTeX 用思源宋体").
@@ -187,13 +194,23 @@ private fun RenderFraction(node: MathNode.Fraction, displayMode: Boolean, styles
  * Square-root sign with a base. We use the Unicode `√` glyph scaled to roughly the base height,
  * with a thin overline drawn on top of the base for the vinculum. The optional root index sits
  * small and to the lower-left of the radical sign for `\sqrt[n]{x}`.
+ *
+ * The vinculum is drawn via [Modifier.drawWithContent] rather than a `matchParentSize + Spacer`
+ * stack — the latter produced a black rectangle when fontSize was Unspecified because
+ * `.height(NaN.dp)` corrupted the measurement.
  */
 @Composable
 private fun RenderSqrt(node: MathNode.Sqrt, displayMode: Boolean, styles: MathStyles) {
     val outer = LocalTextStyle.current
+    val resolvedFontSize = outer.fontSize.let { fs ->
+        if (fs.value > 0f) fs else 16.sp
+    }
+    val vinculumWidth = with(LocalDensity.current) {
+        (resolvedFontSize.value / 16f).coerceAtLeast(0.5f).dp.toPx()
+    }
     Row(verticalAlignment = Alignment.Bottom) {
         if (node.index != null) {
-            val indexStyle = tightStyle(outer, outer.fontSize * 0.6f)
+            val indexStyle = tightStyle(outer, resolvedFontSize * 0.6f)
             CompositionLocalProvider(LocalTextStyle provides indexStyle) {
                 RenderMathNode(node.index, displayMode, styles)
             }
@@ -201,17 +218,21 @@ private fun RenderSqrt(node: MathNode.Sqrt, displayMode: Boolean, styles: MathSt
         }
         Text(
             text = "√",
-            style = tightStyle(outer, outer.fontSize * 1.6f),
+            style = tightStyle(outer, resolvedFontSize * 1.6f),
         )
-        Box {
+        Box(
+            modifier = Modifier.drawWithContent {
+                drawContent()
+                // Vinculum — thin horizontal line along the top of the base.
+                drawLine(
+                    color = styles.fractionBarColor,
+                    start = Offset(x = 0f, y = vinculumWidth / 2f),
+                    end = Offset(x = size.width, y = vinculumWidth / 2f),
+                    strokeWidth = vinculumWidth,
+                )
+            },
+        ) {
             RenderMathNode(node.base, displayMode, styles)
-            // Vinculum — thin line over the base width.
-            Spacer(
-                modifier = Modifier
-                    .matchParentSize()
-                    .height((outer.fontSize.value / 16f).coerceAtLeast(0.5f).dp)
-                    .background(styles.fractionBarColor),
-            )
         }
     }
 }
