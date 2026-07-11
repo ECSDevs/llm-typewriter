@@ -33,6 +33,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
+    // AndroidMath (transitive via :llm-typewriter) pulls in guava-18.0 which already contains
+    // ListenableFuture, and the standalone `com.google.guava:listenablefuture:1.0` duplicates it.
+    configurations.all {
+        exclude(group = "com.google.guava", module = "listenablefuture")
+    }
 }
 
 dependencies {
