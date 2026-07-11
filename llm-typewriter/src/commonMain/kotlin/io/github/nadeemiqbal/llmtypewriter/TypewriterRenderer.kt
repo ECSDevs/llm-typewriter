@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
@@ -18,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLinkStyles
@@ -189,7 +191,10 @@ private fun RenderMarkdownStream(
     modifier: Modifier,
 ) {
     val blocks = remember(text, styles) { planBlocks(parseStreamingMarkdown(text), styles) }
-    Column(modifier = modifier) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         for (block in blocks) {
             when (block) {
                 is MdBlock.Inline -> {
@@ -242,20 +247,37 @@ private fun RenderInlineRunWithMath(segments: List<InlineSegment>, styles: Markd
  * surrounding text. The [content] is the complete LaTeX fragment (the closing `$` has arrived);
  * before that, the parser emits the partial input as plain text, so this is never called with a
  * half-formed string.
+ *
+ * The math view is wrapped in a [Box] whose height is constrained to the text line height. This
+ * prevents the (taller) MTMathView from inflating the FlowRow row — its visual overflow extends
+ * upward without affecting layout, so lines with inline math stay the same height as plain text
+ * lines. Bottom-aligned so the math baseline sits near the text baseline (fixes "行内TeX整体偏高").
  */
 @Composable
 private fun RenderInlineMath(content: String, styles: MarkdownStyles) {
     val baseStyle = LocalTextStyle.current
+    val density = LocalDensity.current
     val resolvedFontSize = baseStyle.fontSize.let { fs ->
         if (fs.value > 0f) fs else 16.sp
     }
+    // Constrain the cell to the text line height — the MTMathView's visual overflow extends
+    // upward without inflating the row.
+    val lineHeight = baseStyle.lineHeight.let { lh ->
+        if (lh.value > 0f) lh else resolvedFontSize * 1.2f
+    }
+    val lineHeightDp = with(density) { lineHeight.toDp() }
     val textColor = styles.math.color.takeIf { it != Color.Unspecified } ?: LocalContentColor.current
-    RenderPlatformMath(
-        latex = content,
-        displayMode = false,
-        textColor = textColor,
-        fontSize = resolvedFontSize,
-    )
+    Box(
+        modifier = Modifier.height(lineHeightDp),
+        contentAlignment = Alignment.BottomStart,
+    ) {
+        RenderPlatformMath(
+            latex = content,
+            displayMode = false,
+            textColor = textColor,
+            fontSize = resolvedFontSize,
+        )
+    }
 }
 
 /**
