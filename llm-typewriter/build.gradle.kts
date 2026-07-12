@@ -52,9 +52,13 @@ kotlin {
         // Resolved from JitPack (see settings.gradle.kts).
         val androidMain by getting {
             dependencies {
-                // String notation — KMP source set `implementation` doesn't accept the version
-                // catalog Provider with an exclude block.
-                implementation("com.github.gregcockroft:AndroidMath:v1.1.0")
+                // Exclude declared on the dependency itself (not via `configurations.all`) so
+                // Gradle emits `<exclusions>` in the published POM — downstream consumers won't
+                // pull in `com.google.guava:listenablefuture:1.0`, whose classes duplicate the
+                // `ListenableFuture` already shipped inside AndroidMath's transitive guava-18.0.
+                implementation("com.github.gregcockroft:AndroidMath:v1.1.0") {
+                    exclude(group = "com.google.guava", module = "listenablefuture")
+                }
             }
         }
 
@@ -79,11 +83,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
-    }
-    // AndroidMath pulls in guava-18.0 which already contains ListenableFuture, and the standalone
-    // `com.google.guava:listenablefuture:1.0` artifact duplicates it → "Duplicate class" at merge.
-    configurations.all {
-        exclude(group = "com.google.guava", module = "listenablefuture")
     }
 }
 

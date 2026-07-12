@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Publishing:** moved the `listenablefuture` exclusion from a build-local
+  `configurations.all { exclude(...) }` rule onto the `AndroidMath` dependency
+  declaration itself. The previous rule only affected the library's own build
+  and was stripped from the published POM, so downstream consumers still pulled
+  in `com.google.guava:listenablefuture:1.0` transitively and hit
+  `Duplicate class com.google.common.util.concurrent.ListenableFuture` at
+  merge. Declaring the exclude on the dependency emits `<exclusions>` in the
+  POM and `excludes` in the Gradle module metadata, so the duplicate no longer
+  reaches consumers. The blanket `configurations.all` rule was removed from
+  the library module to avoid polluting the POM with redundant exclusions on
+  unrelated dependencies.
+
 ### Changed
 - **Attribution:** declared the project as a fork of
   [`NadeemIqbal/llm-typewriter`](https://github.com/NadeemIqbal/llm-typewriter).
