@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI workflows now run on `ubuntu-latest` instead of `macos-latest`.
 
 ### Fixed
+- **Inline LaTeX all rendered at the same width.** Each inline `$…$` equation's
+  `InlineTextContent` placeholder used a fixed `fontSize × 4` estimate, so every equation occupied
+  the same slot regardless of content. The renderer now pre-measures each fragment via a new
+  `measurePlatformMath` expect/actual (a detached `MTMathView.measure` pass on Android) and sizes
+  the placeholder to the equation's actual width — surrounding text reflows correctly around each.
+- **Headings only bolded, not enlarged.** `headingSize` returned `TextUnit.Unspecified`, so `# …`
+  rendered at body size. Replaced with `headingScale` (1.8×/1.5×/1.3×/1.1×/1.0×/0.9× for levels
+  1–6) applied to the ambient font size so headings scale up per CommonMark/HTML convention.
+- **Single newlines broke lines instead of soft-wrapping.** The renderer turned every
+  `MdToken.Newline` into a literal `\n`, forcing a line break for each. New `groupIntoParagraphs`
+  follows CommonMark: a single newline is a soft break (rendered as a space), and a run of two or
+  more newlines collapses to one paragraph break. Block-level tokens (heading/code block/display
+  math) always start their own paragraph. Covered by new `ParagraphGroupingTest`.
 - TeX rendering layout bugs reported in the inline-vs-display review:
   - **Inline math split from surrounding text.** Inline `$…$` math and the markdown text around it
     were forced onto separate rows because each `InlineMath` token became its own `MdBlock`.

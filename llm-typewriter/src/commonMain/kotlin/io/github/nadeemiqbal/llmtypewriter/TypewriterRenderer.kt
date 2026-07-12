@@ -32,6 +32,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.TextUnit
 
 /**
  * Paints the revealed text of a [StreamingTypewriterState] in some way.
@@ -94,44 +95,82 @@ private sealed class InlineSegment {
 
 private fun planBlocks(tokens: List<MdToken>, styles: MarkdownStyles): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
-    val pending = mutableListOf<MdToken>()
-
-    fun flushPending() {
-        if (pending.isEmpty()) return
-        val hasMath = pending.any { it is MdToken.InlineMath }
+    for (group in groupIntoParagraphs(tokens)) {
+        if (group.size == 1) {
+            when (val tok = group[0]) {
+                is MdToken.CodeBlock -> { blocks += MdBlock.Code(tok); continue }
+                is MdToken.Heading -> { blocks += MdBlock.Heading(tok.level, tok.text); continue }
+                is MdToken.DisplayMath -> { blocks += MdBlock.DisplayMath(tok.content); continue }
+                else -> Unit
+            }
+        }
+        val hasMath = group.any { it is MdToken.InlineMath }
         if (hasMath) {
-            blocks += MdBlock.InlineRunWithMath(buildInlineSegments(pending, styles))
+            blocks += MdBlock.InlineRunWithMath(buildInlineSegments(group, styles))
         } else {
-            blocks += MdBlock.Inline(buildAnnotatedFromInline(pending, styles))
-        }
-        pending.clear()
-    }
-
-    for (tok in tokens) {
-        when (tok) {
-            is MdToken.CodeBlock -> {
-                flushPending()
-                blocks += MdBlock.Code(tok)
-            }
-            is MdToken.Heading -> {
-                flushPending()
-                blocks += MdBlock.Heading(tok.level, tok.text)
-            }
-            is MdToken.InlineMath -> {
-                // Don't flush — keep in pending so it renders inline with surrounding text on the
-                // same row, instead of being split onto its own line.
-                pending += tok
-            }
-            is MdToken.DisplayMath -> {
-                flushPending()
-                blocks += MdBlock.DisplayMath(tok.content)
-            }
-            MdToken.Newline -> pending += MdToken.Plain("\n")
-            else -> pending += tok
+            blocks += MdBlock.Inline(buildAnnotatedFromInline(group, styles))
         }
     }
-    flushPending()
     return blocks
+}
+
+/**
+ * Splits a flat token stream into paragraph groups following CommonMark soft-break rules:
+ *  - A run of **two or more** consecutive [MdToken.Newline]s ends a paragraph (blank-line
+ *    separator). Any number of newlines ≥ 2 collapses to a single paragraph break.
+ *  - A **single** [MdToken.Newline] is a soft break — rendered as a space so wrapped text joins
+ *    across the line instead of breaking.
+ *  - Block-level tokens ([MdToken.Heading], [MdToken.CodeBlock], [MdToken.DisplayMath]) always
+ *    start their own group and act as implicit paragraph breaks.
+ *
+ * A single newline at a block boundary (when the current group is empty) is dropped so it doesn't
+ * introduce a leading space in the next paragraph.
+ *
+ * Pure and side-effect-free so it's unit-testable without the Compose runtime.
+ */
+internal fun groupIntoParagraphs(tokens: List<MdToken>): List<List<MdToken>> {
+    val groups = mutableListOf<MutableList<MdToken>>()
+    var current = mutableListOf<MdToken>()
+    fun flush() {
+        if (current.isNotEmpty()) {
+            groups += current
+            current = mutableListOf()
+        }
+    }
+    var i = 0
+    while (i < tokens.size) {
+        val tok = tokens[i]
+        when (tok) {
+            is MdToken.Heading, is MdToken.CodeBlock, is MdToken.DisplayMath -> {
+                flush()
+                groups += mutableListOf(tok)
+            }
+            MdToken.Newline -> {
+                // Count the run of consecutive newlines.
+                var run = 1
+                while (i + run < tokens.size && tokens[i + run] == MdToken.Newline) run++
+                val next = tokens.getOrNull(i + run)
+                val nextIsBlock =
+                    next is MdToken.Heading || next is MdToken.CodeBlock || next is MdToken.DisplayMath
+                when {
+                    // Blank line (2+ newlines) → paragraph break.
+                    run >= 2 -> flush()
+                    // Single newline immediately before a block-level token → paragraph break
+                    // (don't seed a trailing space; the block token flushes its own group).
+                    nextIsBlock -> flush()
+                    // Single newline between two inline runs → CommonMark soft break (space).
+                    current.isNotEmpty() && next != null -> current += MdToken.Plain(" ")
+                    // else: single newline at block boundary or end of input → drop.
+                }
+                i += run
+                continue
+            }
+            else -> current += tok
+        }
+        i++
+    }
+    flush()
+    return groups
 }
 
 /**
@@ -182,9 +221,13 @@ private fun RenderMarkdownStream(
                 }
                 is MdBlock.InlineRunWithMath -> RenderInlineRunWithMath(block.segments, styles)
                 is MdBlock.Heading -> {
-                    val style = LocalTextStyle.current.copy(
+                    val base = LocalTextStyle.current
+                    val baseSize = base.fontSize.let { fs ->
+                        if (fs.value > 0f) fs else 16.sp
+                    }
+                    val style = base.copy(
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                        fontSize = headingSize(block.level),
+                        fontSize = baseSize * headingScale(block.level),
                     )
                     Text(text = block.text, style = style)
                 }
@@ -210,13 +253,16 @@ private fun RenderMarkdownStream(
  *
  * Each math segment becomes an `appendInlineContent` marker in the [AnnotatedString]; the
  * [InlineTextContent] map renders each marker via [RenderInlineMath]. The placeholder width is
- * a rough estimate — the actual math view may overflow visually, but this is acceptable because
- * the math view's height is constrained (see [RenderInlineMath]) and the text reflows around the
- * placeholder, not the visual overflow.
+ * the equation's **actual measured width** (via [measurePlatformMath]) so each inline equation
+ * gets its own width and surrounding text reflows correctly — previously every equation got a
+ * fixed `fontSize * 4` slot regardless of content. The placeholder height stays at the text line
+ * height so the math view cannot inflate the line; any vertical overflow is clipped (see
+ * [RenderInlineMath]).
  */
 @Composable
 private fun RenderInlineRunWithMath(segments: List<InlineSegment>, styles: MarkdownStyles) {
     val baseStyle = LocalTextStyle.current
+    val density = LocalDensity.current
     val resolvedFontSize = baseStyle.fontSize.let { fs ->
         if (fs.value > 0f) fs else 16.sp
     }
@@ -224,19 +270,34 @@ private fun RenderInlineRunWithMath(segments: List<InlineSegment>, styles: Markd
         if (lh.value > 0f) lh else resolvedFontSize * 1.2f
     }
 
+    // Pre-measure each math fragment so the placeholder width matches the equation's actual
+    // rendered width (instead of a fixed estimate). A manual loop avoids calling a @Composable
+    // from an inline lambda such as List.map, which the Compose compiler rejects.
+    val mathWidths = mutableListOf<TextUnit>()
+    for (segment in segments) {
+        if (segment is InlineSegment.Math) {
+            val measured = measurePlatformMath(segment.content, displayMode = false, resolvedFontSize)
+            mathWidths += with(density) { measured.width.toSp() }
+        } else {
+            mathWidths += TextUnit.Unspecified
+        }
+    }
+
     // Collect math segments for inline content; build the annotated string with markers.
     val mathContents = mutableMapOf<String, InlineTextContent>()
     val annotated = buildAnnotatedString {
         var mathIndex = 0
+        var widthIndex = 0
         for (segment in segments) {
             when (segment) {
                 is InlineSegment.Text -> append(segment.annotated)
                 is InlineSegment.Math -> {
                     val id = "math_${mathIndex++}"
                     appendInlineContent(id, segment.content)
+                    val width = mathWidths[widthIndex]
                     mathContents[id] = InlineTextContent(
                         placeholder = Placeholder(
-                            width = resolvedFontSize * 4f, // rough estimate; actual view may overflow
+                            width = width,
                             height = lineHeight,
                             placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
                         ),
@@ -245,6 +306,7 @@ private fun RenderInlineRunWithMath(segments: List<InlineSegment>, styles: Markd
                     }
                 }
             }
+            widthIndex++
         }
     }
 
@@ -323,8 +385,19 @@ private fun RenderDisplayMath(content: String, styles: MarkdownStyles) {
     }
 }
 
-private fun headingSize(@Suppress("UNUSED_PARAMETER") level: Int): androidx.compose.ui.unit.TextUnit =
-    androidx.compose.ui.unit.TextUnit.Unspecified
+/**
+ * Font-size multiplier for a heading level relative to the ambient body font size. Mirrors the
+ * common Markdown/HTML convention: `#` is largest, `######` is below body size.
+ */
+private fun headingScale(level: Int): Float = when (level) {
+    1 -> 1.8f
+    2 -> 1.5f
+    3 -> 1.3f
+    4 -> 1.1f
+    5 -> 1.0f
+    6 -> 0.9f
+    else -> 1.0f
+}
 
 internal fun buildAnnotatedFromInline(tokens: List<MdToken>, styles: MarkdownStyles): AnnotatedString {
     return buildAnnotatedString {

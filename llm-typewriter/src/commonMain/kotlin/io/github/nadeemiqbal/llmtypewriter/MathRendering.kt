@@ -3,6 +3,7 @@ package io.github.nadeemiqbal.llmtypewriter
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.TextUnit
 
 /**
@@ -35,3 +36,25 @@ internal expect fun RenderPlatformMath(
     fontSize: TextUnit,
     modifier: Modifier = Modifier,
 )
+
+/**
+ * Measures the rendered size (in pixels) of a LaTeX fragment without displaying it. Used by the
+ * inline-math renderer to size the [androidx.compose.foundation.text.InlineTextContent]
+ * placeholder to the equation's actual width instead of a fixed estimate, so each inline
+ * equation gets its own width and surrounding text reflows correctly.
+ *
+ * Contractually returns `IntSize.Zero` only when [latex] is empty. Otherwise the platform backend
+ * lays out the equation (off-screen) and reports its measured width/height. The result is cached
+ * per (latex, displayMode, fontSize) triple via [androidx.compose.runtime.remember].
+ *
+ * @param latex The complete LaTeX fragment (no surrounding `$`).
+ * @param displayMode `true` for display style, `false` for inline text style.
+ * @param fontSize Font size in sp.
+ * @return Measured size in device pixels.
+ */
+@Composable
+internal expect fun measurePlatformMath(
+    latex: String,
+    displayMode: Boolean,
+    fontSize: TextUnit,
+): IntSize

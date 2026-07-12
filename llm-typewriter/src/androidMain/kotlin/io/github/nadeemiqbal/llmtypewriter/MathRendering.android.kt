@@ -1,10 +1,14 @@
 package io.github.nadeemiqbal.llmtypewriter
 
+import android.view.View
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.viewinterop.AndroidView
 import com.agog.mathdisplay.MTMathView
@@ -59,4 +63,42 @@ actual fun RenderPlatformMath(
             view.fontSize = fontSizePx
         },
     )
+}
+
+/**
+ * Android actual: creates a detached [MTMathView], configures it identically to [RenderPlatformMath]
+ * (same [latex], [labelMode][MTMathView.labelMode], [fontSize][MTMathView.fontSize]), and runs a
+ * synthetic [View.measure] pass with `UNSPECIFIED` constraints so the view reports its intrinsic
+ * content size. The measured width/height (in px) are returned.
+ *
+ * The view is never attached to a window — `measure()` is sufficient for `MTMathView` to lay out
+ * its equation because it computes its own dimensions from the parsed LaTeX and font metrics.
+ * The result is cached via [remember] keyed on (latex, displayMode, fontSizePx) so a given
+ * equation is only laid out once across recompositions.
+ */
+@Composable
+actual fun measurePlatformMath(
+    latex: String,
+    displayMode: Boolean,
+    fontSize: TextUnit,
+): IntSize {
+    if (latex.isEmpty()) return IntSize.Zero
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val fontSizePx = with(density) { fontSize.toPx() }
+    val labelMode = if (displayMode) {
+        MTMathView.MTMathViewMode.KMTMathViewModeDisplay
+    } else {
+        MTMathView.MTMathViewMode.KMTMathViewModeText
+    }
+    return remember(latex, displayMode, fontSizePx) {
+        val view = MTMathView(context)
+        view.latex = latex
+        view.labelMode = labelMode
+        view.fontSize = fontSizePx
+        view.textAlignment = MTMathView.MTTextAlignment.KMTTextAlignmentLeft
+        val unspecified = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        view.measure(unspecified, unspecified)
+        IntSize(view.measuredWidth, view.measuredHeight)
+    }
 }
