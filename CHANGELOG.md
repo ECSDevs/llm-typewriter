@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Ordered & unordered lists.** The streaming Markdown parser now recognises unordered
+  (`-` / `*` / `+`) and ordered (`1.` / `1)`) list markers at line start, including indented
+  nesting (2-space indent unit). Each list item is emitted as a `MdToken.ListItem` whose inline
+  content is parsed recursively — so bold, italic, inline code, links, and inline `$…$` math
+  all render inside list items. The renderer builds a nested `MdBlock.ListBlock` tree from a
+  run of `ListItem` tokens and paints it as a real indented list with `•` / `N.` markers.
+  Marker-vs-plain-text disambiguation follows CommonMark: `1.text` (no space after marker),
+  `---` (horizontal rule territory), and dates like `2024.01.01` do **not** trigger list parsing.
+
 ### Fixed
 - **Publishing:** moved the `listenablefuture` exclusion from a build-local
   `configurations.all { exclude(...) }` rule onto the `AndroidMath` dependency
@@ -28,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The fork detached from GitHub's fork network because of substantial divergence
   (Android-only target, streaming LaTeX math, incremental parsing, performance
   work); all code — original and modified — remains Apache 2.0.
+- **Sample app:** the single "New stream" button (which auto-cycled the demo
+  responses) has been replaced with a row of named stream chips — "Markdown &
+  code", "Python", "Plain text", "Math", "Lists". Tapping a chip plays that
+  stream directly, and the currently-loaded stream is highlighted. The playback
+  controls (Stop / Resume / Speed) moved into a separate row.
 
 ## [0.1.0] - 2026-07-12
 

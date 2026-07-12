@@ -158,4 +158,92 @@ class ParagraphGroupingTest {
             groupIntoParagraphs(tokens),
         )
     }
+
+    // --- Lists ---
+
+    @Test
+    fun consecutiveListItems_groupTogether() {
+        // Two list items with no intervening newline token (the parser consumes the trailing
+        // newline) — they should land in the same group so the renderer can build one list tree.
+        val a = MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("a")))
+        val b = MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("b")))
+        assertEquals(
+            listOf(listOf(a, b)),
+            groupIntoParagraphs(listOf(a, b)),
+        )
+    }
+
+    @Test
+    fun blankLineBetweenListItems_splitsIntoTwoListGroups() {
+        // `- a\n\n- b` — blank line separates the items into two list groups (two separate lists).
+        val a = MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("a")))
+        val b = MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("b")))
+        val tokens = listOf(a, MdToken.Newline, MdToken.Newline, b)
+        assertEquals(
+            listOf(listOf(a), listOf(b)),
+            groupIntoParagraphs(tokens),
+        )
+    }
+
+    @Test
+    fun textAfterList_singleNewlineFlushesList() {
+        // A single newline between a list item and inline text ends the list group — the text
+        // starts a fresh paragraph instead of being soft-break-joined onto the last item.
+        val a = MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("a")))
+        val tokens = listOf(a, MdToken.Newline, MdToken.Plain("after"))
+        assertEquals(
+            listOf(listOf(a), listOf(MdToken.Plain("after"))),
+            groupIntoParagraphs(tokens),
+        )
+    }
+
+    @Test
+    fun listFollowedByBlockLevel_singleNewlineDropped() {
+        // A single newline between a list item and a block-level token (e.g. heading) is dropped
+        // — no leading-space seed in the heading's group.
+        val a = MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("a")))
+        val h = MdToken.Heading(2, "Section")
+        val tokens = listOf(a, MdToken.Newline, h)
+        assertEquals(
+            listOf(listOf(a), listOf(h)),
+            groupIntoParagraphs(tokens),
+        )
+    }
+
+    @Test
+    fun listInterruptsParagraph() {
+        // Some inline text, single newline, then a list item — the list item starts a fresh group.
+        val a = MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("a")))
+        val tokens = listOf(MdToken.Plain("intro"), MdToken.Newline, a)
+        assertEquals(
+            listOf(listOf(MdToken.Plain("intro")), listOf(a)),
+            groupIntoParagraphs(tokens),
+        )
+    }
+
+    @Test
+    fun listFollowedByAnotherList_noSpaceJoined() {
+        // Two list items separated by a single newline token (shouldn't normally happen — the
+        // parser consumes trailing newlines — but if it does, the newline should be dropped, not
+        // turned into a soft-break space).
+        val a = MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("a")))
+        val b = MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("b")))
+        val tokens = listOf(a, MdToken.Newline, b)
+        assertEquals(
+            listOf(listOf(a, b)),
+            groupIntoParagraphs(tokens),
+        )
+    }
+
+    @Test
+    fun paragraphFollowedByList_noLeadingSpaceInList() {
+        // A paragraph followed by a list — the list starts its own group; no Plain(" ") gets
+        // seeded at the front of the list group from the boundary newline.
+        val a = MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("a")))
+        val tokens = listOf(MdToken.Plain("intro"), MdToken.Newline, MdToken.Newline, a)
+        assertEquals(
+            listOf(listOf(MdToken.Plain("intro")), listOf(a)),
+            groupIntoParagraphs(tokens),
+        )
+    }
 }

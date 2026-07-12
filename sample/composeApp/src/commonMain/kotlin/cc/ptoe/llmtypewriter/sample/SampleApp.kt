@@ -63,67 +63,105 @@ fun SampleApp() {
     }
 }
 
-private val FakeResponses = listOf(
-    """
-        # Hello there!
+private data class DemoStream(val name: String, val content: String)
 
-        I'm a **fake assistant** that streams text one token at a time.
+private val DemoStreams = listOf(
+    DemoStream(
+        name = "Markdown & code",
+        content = """
+            # Hello there!
 
-        Here's some _Kotlin_ code:
+            I'm a **fake assistant** that streams text one token at a time.
 
-        ```kotlin
-        fun greet(name: String): String {
-            // Greet the user — simple as that.
-            return "Hello, ${'$'}name!"
-        }
-        ```
+            Here's some _Kotlin_ code:
 
-        Notice how the code block builds up *progressively*, with **syntax highlighting** that
-        appears as the tokens stream in. Pretty, right?
+            ```kotlin
+            fun greet(name: String): String {
+                // Greet the user — simple as that.
+                return "Hello, ${'$'}name!"
+            }
+            ```
 
-        - Headings render once the line completes
-        - Bold/italic flip the moment the closing delimiter arrives
-        - Inline `code` works too
+            Notice how the code block builds up *progressively*, with **syntax highlighting** that
+            appears as the tokens stream in. Pretty, right?
 
-        Tap me to skip to the end.
-    """.trimIndent(),
+            - Headings render once the line completes
+            - Bold/italic flip the moment the closing delimiter arrives
+            - Inline `code` works too
 
-    """
-        Sure — here's a quick `Python` example:
+            Tap me to skip to the end.
+        """.trimIndent(),
+    ),
+    DemoStream(
+        name = "Python",
+        content = """
+            Sure — here's a quick `Python` example:
 
-        ```python
-        def fib(n):
-            # Classic recursive Fibonacci
-            if n < 2:
-                return n
-            return fib(n - 1) + fib(n - 2)
-        ```
+            ```python
+            def fib(n):
+                # Classic recursive Fibonacci
+                if n < 2:
+                    return n
+                return fib(n - 1) + fib(n - 2)
+            ```
 
-        And a [link to the docs](https://kotlinlang.org).
-    """.trimIndent(),
+            And a [link to the docs](https://kotlinlang.org).
+        """.trimIndent(),
+    ),
+    DemoStream(
+        name = "Plain text",
+        content = """
+            Plain text response — no markdown, just streaming words with a `Natural` speed curve so
+            the pauses on punctuation feel like a real typist. Notice the slight hesitation here.
+            And here. And here!
+        """.trimIndent(),
+    ),
+    DemoStream(
+        name = "Math",
+        content = """
+            ## Math rendering
 
-    """
-        Plain text response — no markdown, just streaming words with a `Natural` speed curve so
-        the pauses on punctuation feel like a real typist. Notice the slight hesitation here.
-        And here. And here!
-    """.trimIndent(),
+            Inline math works mid-sentence: the Pythagorean theorem ${'$'}a^2 + b^2 = c^2${'$'} is
+            rendered inline, while display math gets its own block:
 
-    """
-        ## Math rendering
+            ${'$'}${'$'}\sum_{i=1}^{n} i^2 = \frac{n(n+1)(2n+1)}{6}${'$'}${'$'}
 
-        Inline math works mid-sentence: the Pythagorean theorem ${'$'}a^2 + b^2 = c^2${'$'} is
-        rendered inline, while display math gets its own block:
+            Sub and superscript line up in the **same column** — ${'$'}x_a^b${'$'} — and big
+            operators stack their limits above and below the glyph in display mode:
 
-        ${'$'}${'$'}\sum_{i=1}^{n} i^2 = \frac{n(n+1)(2n+1)}{6}${'$'}${'$'}
+            ${'$'}${'$'}\int_0^{\infty} e^{-x^2} dx = \frac{\sqrt{\pi}}{2}${'$'}${'$'}
 
-        Sub and superscript line up in the **same column** — ${'$'}x_a^b${'$'} — and big
-        operators stack their limits above and below the glyph in display mode:
+            Greek letters (${'$'}\alpha${'$'}, ${'$'}\beta${'$'}, ${'$'}\pi${'$'}), roots
+            ${'$'}\sqrt{x^2 + y^2}${'$'}, and fractions all render as they stream in.
+        """.trimIndent(),
+    ),
+    DemoStream(
+        name = "Lists",
+        content = """
+            ## Lists
 
-        ${'$'}${'$'}\int_0^{\infty} e^{-x^2} dx = \frac{\sqrt{\pi}}{2}${'$'}${'$'}
+            Here's an **unordered** list with inline formatting:
 
-        Greek letters (${'$'}\alpha${'$'}, ${'$'}\beta${'$'}, ${'$'}\pi${'$'}), roots
-        ${'$'}\sqrt{x^2 + y^2}${'$'}, and fractions all render as they stream in.
-    """.trimIndent(),
+            - First item with `inline code`
+            - Second item with _italic text_
+            - Third item with an inline equation: ${'$'}E = mc^2${'$'}
+            - A nested list demonstrates indentation:
+              - Sub-item at depth one
+              - Another sub-item
+                - And one more level deeper
+            - Back to the top level
+
+            And an **ordered** list (note how numbers are preserved):
+
+            3. Starting from three, not one
+            4. The next item follows sequentially
+            5. Each item supports formatting too — **bold**, _italic_, `code`
+
+            Lists can also interrupt paragraphs without a blank line,
+            - like this
+            - and this
+        """.trimIndent(),
+    ),
 )
 
 @Composable
@@ -134,7 +172,8 @@ private fun DemoScreen() {
     val tokenChannel = remember { MutableSharedFlow<String>(extraBufferCapacity = 64) }
     val scope = rememberCoroutineScope()
 
-    var responseIndex by remember { mutableStateOf(0) }
+    var currentStreamIndex by remember { mutableStateOf(0) }
+    var playCount by remember { mutableStateOf(0) }
     var currentCurve by remember { mutableStateOf(SpeedCurve.Natural) }
     var currentCurveName by remember { mutableStateOf("Natural") }
 
@@ -157,26 +196,46 @@ private fun DemoScreen() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        // Compact, horizontally-scrollable button bar — narrow padding + small text so the row
-        // doesn't dominate the screen on a phone and the 4th button stays reachable.
+        // Compact, horizontally-scrollable button bars — narrow padding + small text so the rows
+        // don't dominate the screen on a phone and every button stays reachable.
         val compactPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
         val labelStyle = MaterialTheme.typography.labelSmall
+
+        // Stream selector — one chip per demo stream. Tapping a chip resets the typewriter and
+        // plays that stream; the currently-loaded stream is shown as a filled button.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Button(
-                onClick = {
+            DemoStreams.forEachIndexed { index, stream ->
+                val isSelected = index == currentStreamIndex
+                val onClick: () -> Unit = {
                     state.reset()
-                    scope.launch {
-                        streamFakeResponse(FakeResponses[responseIndex % FakeResponses.size], tokenChannel)
+                    currentStreamIndex = index
+                    playCount++
+                    scope.launch { streamFakeResponse(stream.content, tokenChannel) }
+                }
+                if (isSelected) {
+                    Button(onClick = onClick, contentPadding = compactPadding) {
+                        Text(stream.name, style = labelStyle)
                     }
-                    responseIndex++
-                },
-                contentPadding = compactPadding,
-            ) { Text("New stream", style = labelStyle) }
+                } else {
+                    OutlinedButton(onClick = onClick, contentPadding = compactPadding) {
+                        Text(stream.name, style = labelStyle)
+                    }
+                }
+            }
+        }
+
+        // Playback controls.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             OutlinedButton(
                 onClick = { state.stop() },
                 enabled = state.isStreaming,
@@ -249,9 +308,9 @@ private fun DemoScreen() {
         // List of past prompts — purely cosmetic.
         val history = remember { mutableStateListOf("New stream demo") }
         val listState = rememberLazyListState()
-        LaunchedEffect(responseIndex) {
-            if (responseIndex > 0) {
-                history.add("Response #$responseIndex")
+        LaunchedEffect(playCount) {
+            if (playCount > 0) {
+                history.add(DemoStreams[currentStreamIndex].name)
                 listState.animateScrollToItem(history.lastIndex)
             }
         }

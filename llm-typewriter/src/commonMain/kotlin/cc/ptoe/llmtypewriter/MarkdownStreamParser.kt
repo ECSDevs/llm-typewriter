@@ -56,6 +56,31 @@ sealed class MdToken {
      * [closed] flips to `true` once the closing `$$` arrives.
      */
     data class DisplayMath(val content: String, val closed: Boolean) : MdToken()
+
+    /**
+     * A list item — `-`, `*`, `+`, `1.`, `2.` etc. at line start (optionally indented for nesting).
+     *
+     * - [ordered] is `true` for `1.` / `1)` markers, `false` for `-` / `*` / `+`.
+     * - [number] carries the marker number for ordered lists (e.g. `1`, `2`, `3`); `0` for
+     *    unordered. The renderer uses the **first** item's number as the list's start number.
+     * - [indent] is the leading-space count divided by 2 (so `  - sub` has `indent = 1`).
+     *    Two-space indent unit mirrors the most common LLM output; larger indents still nest one
+     *    level per [indent] step.
+     * - [inline] is the inline content parsed from the rest of the line after the marker. Single
+     *    line only — multi-line list items (continuation lines) are not yet supported; the parser
+     *    falls back to treating each non-marker line as its own paragraph.
+     *
+     * Prefix-stability note: as the line grows, [inline] is re-parsed from scratch (just like a
+     * [CodeBlock]'s content grows). Earlier inline tokens stay stable because
+     * [parseStreamingMarkdown] is itself prefix-stable; only the trailing "open" token
+     * re-classifies once its close arrives.
+     */
+    data class ListItem(
+        val ordered: Boolean,
+        val number: Int,
+        val indent: Int,
+        val inline: List<MdToken>,
+    ) : MdToken()
 }
 
 /**
@@ -72,6 +97,8 @@ sealed class MdToken {
  *   - Bold+italic (`***` / `___`)
  *   - Strikethrough (`~~`)
  *   - Links (`[label](url)`)
+ *   - Unordered lists (`-` / `*` / `+` at line start, optionally indented for nesting)
+ *   - Ordered lists (`1.` / `1)` at line start, optionally indented for nesting)
  *
  * Open spans at the tail of the input are rendered as plain text until they close — but the
  * tokens before them are stable, so the live renderer doesn't reflow earlier text.
@@ -108,6 +135,23 @@ internal fun parseStreamingMarkdown(input: String): List<MdToken> {
             if (headingEnd > i) {
                 i = headingEnd
                 atLineStart = false
+                continue
+            }
+        }
+
+        // List items — must fire before `atLineStart = false` so the leading `*` / `+` / `-`
+        // markers win over inline emphasis parsing, and before the inline `Plain` run so the
+        // marker isn't swallowed into a plain token. Heading check above already exited, so a
+        // `#`-prefixed line never reaches here.
+        if (atLineStart) {
+            val listEnd = consumeListItemIfAny(input, i, out)
+            if (listEnd > i) {
+                i = listEnd
+                // We consumed through the trailing newline (if any), so the next iteration is at
+                // the start of a new line — list items chain without an intervening Newline
+                // token, which is what lets `groupIntoParagraphs` treat consecutive items as one
+                // list group.
+                atLineStart = true
                 continue
             }
         }
@@ -272,6 +316,101 @@ private fun consumeHeading(input: String, start: Int, out: MutableList<MdToken>)
     val lineEnd = input.indexOf('\n', startIndex = j).let { if (it < 0) input.length else it }
     out += MdToken.Heading(level, input.substring(j, lineEnd).trimEnd())
     return lineEnd
+}
+
+/**
+ * Tries to consume a list item starting at [start] (which is at a line start, possibly with
+ * leading spaces). On match, emits a [MdToken.ListItem] to [out] and returns the index past the
+ * trailing newline (so the next iteration is at line start again). On no match, returns [start]
+ * unchanged so the caller falls through to other parsing.
+ *
+ * Indentation is counted in units of 2 spaces (`  - sub` → indent 1) — the most common LLM
+ * convention. A single leading space is treated as indent 0 (some style guides use one-space
+ * indents); 3 spaces round down to 1, 4 to 2, etc. (CommonMark treats tabs and varying spaces
+ * specially; we deliberately stay simpler to keep prefix-stability tractable).
+ */
+private fun consumeListItemIfAny(input: String, start: Int, out: MutableList<MdToken>): Int {
+    val len = input.length
+    var j = start
+    // Skip leading spaces — capped at 8 to avoid pathological inputs.
+    var spaces = 0
+    while (j < len && input[j] == ' ' && spaces < 8) {
+        spaces++
+        j++
+    }
+    val indent = spaces / 2
+
+    val marker = matchListMarker(input, j) ?: return start
+    val contentStart = marker.contentStart
+    val lineEnd = input.indexOf('\n', startIndex = contentStart).let { if (it < 0) len else it }
+    val content = input.substring(contentStart, lineEnd).trimEnd()
+    // Recursively parse the inline content of the line. The recursive call sees no `\n`, so it
+    // can't itself emit a CodeBlock fence or a Heading (those require `\n` boundaries) — only
+    // inline spans (bold / italic / inline code / inline math / links).
+    val inline = parseStreamingMarkdown(content)
+    out += MdToken.ListItem(
+        ordered = marker.ordered,
+        number = marker.number,
+        indent = indent,
+        inline = inline,
+    )
+    // Consume through the trailing newline so the next iteration starts at the next line — list
+    // items chain without an intervening Newline token.
+    return if (lineEnd < len) lineEnd + 1 else len
+}
+
+private data class ListMarkerMatch(val ordered: Boolean, val number: Int, val contentStart: Int)
+
+/**
+ * Matches a list marker at position [at] in [input]. Supports:
+ *   - Unordered: `-`, `*`, `+` followed by a space (or end-of-line / end-of-input — empty item).
+ *   - Ordered:   `\d+(\.|\))` followed by a space (or end-of-line / end-of-input — empty item).
+ *
+ * Returns `null` if no marker matches. CommonMark requires the space-after-marker rule, so
+ * `1.text` (no space) does NOT parse as a list item — it falls through to plain text. This is
+ * important for things like dates (`2024.01.01`) and dotted version numbers.
+ */
+private fun matchListMarker(input: String, at: Int): ListMarkerMatch? {
+    val len = input.length
+    if (at >= len) return null
+    val c = input[at]
+
+    // Unordered: - * +
+    if (c == '-' || c == '*' || c == '+') {
+        if (at + 1 < len && input[at + 1] == ' ') {
+            return ListMarkerMatch(ordered = false, number = 0, contentStart = at + 2)
+        }
+        // Allow an empty item at end-of-line / end-of-input: `-` or `-\n`.
+        if (at + 1 >= len || input[at + 1] == '\n') {
+            return ListMarkerMatch(ordered = false, number = 0, contentStart = minOf(at + 1, len))
+        }
+        return null
+    }
+
+    // Ordered: \d+(\.|\))
+    if (c.isDigit()) {
+        var j = at
+        var num = 0
+        var digits = 0
+        while (j < len && input[j].isDigit()) {
+            num = num * 10 + (input[j] - '0')
+            j++
+            digits++
+            // 9+ digits is almost certainly not a list marker (e.g. a large number) — bail.
+            if (digits > 9) return null
+        }
+        if (j < len && (input[j] == '.' || input[j] == ')')) {
+            if (j + 1 < len && input[j + 1] == ' ') {
+                return ListMarkerMatch(ordered = true, number = num, contentStart = j + 2)
+            }
+            // Allow an empty item at end-of-line / end-of-input: `1.` or `1.\n`.
+            if (j + 1 >= len || input[j + 1] == '\n') {
+                return ListMarkerMatch(ordered = true, number = num, contentStart = minOf(j + 1, len))
+            }
+        }
+    }
+
+    return null
 }
 
 private fun consumeCodeBlock(input: String, start: Int, out: MutableList<MdToken>): Int {

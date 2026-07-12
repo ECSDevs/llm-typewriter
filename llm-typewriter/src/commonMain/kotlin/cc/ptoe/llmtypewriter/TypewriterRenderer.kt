@@ -4,10 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
@@ -83,8 +85,11 @@ fun MarkdownTypewriterRenderer(
  * A block of layout for the markdown renderer to paint sequentially. Pre-built outside the
  * composition so the `RenderMarkdownStream` body can be a clean for-loop of `@Composable` calls
  * (without the "non-composable nested function calls @Composable" error).
+ *
+ * `internal` (not `private`) so that pure-logic helpers like [buildListBlock] — which produce
+ * [ListBlock]s — can be unit-tested without the Compose runtime.
  */
-private sealed class MdBlock {
+internal sealed class MdBlock {
     data class Inline(val annotated: AnnotatedString) : MdBlock()
     /** Inline run that contains math segments interleaved with text — laid out on a single
      *  wrapped line via [FlowRow] so math sits inline with surrounding words (not on its own row). */
@@ -93,10 +98,36 @@ private sealed class MdBlock {
     data class Code(val token: MdToken.CodeBlock) : MdBlock()
     /** Display math `$$...$$` — block-level, centered, with background. */
     data class DisplayMath(val content: String) : MdBlock()
+    /**
+     * A list (ordered or unordered). Built from a run of [MdToken.ListItem] tokens via
+     * [buildListBlock]. The first item's [startNumber] becomes the list's start number for
+     * ordered lists (so `3. ...` starts at 3); for unordered lists it's 0.
+     *
+     * Named `ListBlock` (not `List`) to avoid collision with `kotlin.collections.List` inside
+     * this file's many `List<…>` parameter / variable types.
+     */
+    data class ListBlock(
+        val ordered: Boolean,
+        val startNumber: Int,
+        val items: List<ListItemNode>,
+    ) : MdBlock()
 }
 
-/** A segment within an [MdBlock.InlineRunWithMath] — either styled text or a math fragment. */
-private sealed class InlineSegment {
+/**
+ * One entry in an [MdBlock.ListBlock]. [inline] is the item's text content (already parsed into
+ * tokens by the streaming parser); [sublists] are nested lists rendered indented under this item.
+ *
+ * `internal` (not `private`) so [buildListBlock] can return it for unit testing.
+ */
+internal data class ListItemNode(
+    val inline: List<MdToken>,
+    val sublists: List<MdBlock.ListBlock>,
+)
+
+/** A segment within an [MdBlock.InlineRunWithMath] — either styled text or a math fragment.
+ *  `internal` (not `private`) because [MdBlock] is internal and this type leaks through
+ *  [MdBlock.InlineRunWithMath.segments]. */
+internal sealed class InlineSegment {
     data class Text(val annotated: AnnotatedString) : InlineSegment()
     data class Math(val content: String) : InlineSegment()
 }
@@ -104,6 +135,17 @@ private sealed class InlineSegment {
 private fun planBlocks(tokens: List<MdToken>, styles: MarkdownStyles): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
     for (group in groupIntoParagraphs(tokens)) {
+        // List items group together — consecutive ListItem tokens (with no intervening paragraph
+        // break) form one [MdBlock.ListBlock]. Detected before the single-token branches below so
+        // a lone list item doesn't fall into the inline-assembly path.
+        val firstTok = group.firstOrNull()
+        if (firstTok is MdToken.ListItem) {
+            val listItems = group.filterIsInstance<MdToken.ListItem>()
+            if (listItems.isNotEmpty()) {
+                blocks += buildListBlock(listItems)
+                continue
+            }
+        }
         if (group.size == 1) {
             when (val tok = group[0]) {
                 is MdToken.CodeBlock -> { blocks += MdBlock.Code(tok); continue }
@@ -123,13 +165,96 @@ private fun planBlocks(tokens: List<MdToken>, styles: MarkdownStyles): List<MdBl
 }
 
 /**
+ * Builds an [MdBlock.List] tree from a flat run of [MdToken.ListItem] tokens. Indentation drives
+ * nesting — an item with `indent = N + 1` (deeper than the previous `indent = N`) becomes a child
+ * of the previous item at indent `N`. Items at the same indent are siblings.
+ *
+ * The stack holds the active nesting path; each level knows its [ordered] / [startNumber] / [indent]
+ * plus a mutable list of items being built. When a new item arrives:
+ *   1. Pop levels deeper than the new item's indent.
+ *   2. If the top is shallower than the new item's indent, push a new level (as a sublist of the
+ *      top's last item). Indent jumps larger than 1 are clamped to `top.indent + 1` so a stray
+ *      6-space indent doesn't create 3 phantom nesting levels.
+ *   3. Add the item to the top level.
+ *
+ * Pure and side-effect-free so it's unit-testable without the Compose runtime.
+ */
+internal fun buildListBlock(tokens: List<MdToken.ListItem>): MdBlock.ListBlock {
+    if (tokens.isEmpty()) return MdBlock.ListBlock(ordered = false, startNumber = 0, items = emptyList())
+    val root = MutableListLevel(
+        ordered = tokens.first().ordered,
+        startNumber = tokens.first().number,
+        indent = tokens.first().indent,
+    )
+    val stack = mutableListOf(root)
+
+    for (tok in tokens) {
+        // Pop levels deeper than the current item's indent.
+        while (stack.size > 1 && stack.last().indent > tok.indent) {
+            stack.removeAt(stack.lastIndex)
+        }
+        val top = stack.last()
+        if (top.indent < tok.indent) {
+            // Deeper than the current top — push a new sublevel under the top's last item.
+            // Clamp indent to top.indent + 1 to avoid phantom nesting on big jumps.
+            val newIndent = minOf(tok.indent, top.indent + 1)
+            val newLevel = MutableListLevel(
+                ordered = tok.ordered,
+                startNumber = tok.number,
+                indent = newIndent,
+            )
+            if (top.items.isEmpty()) {
+                // No parent item exists yet — create an empty placeholder so the sublist has a
+                // parent to attach to. (Shouldn't normally happen for well-formed input.)
+                top.items += MutableListItem()
+            }
+            top.items.last().sublists += newLevel
+            stack += newLevel
+        }
+        stack.last().items += MutableListItem(inline = tok.inline)
+    }
+
+    return root.freeze()
+}
+
+/** Mutable builder used by [buildListBlock] — frozen into an [MdBlock.ListBlock] at the end. */
+private class MutableListLevel(
+    val ordered: Boolean,
+    val startNumber: Int,
+    val indent: Int,
+    val items: MutableList<MutableListItem> = mutableListOf(),
+)
+
+private class MutableListItem(
+    var inline: List<MdToken> = emptyList(),
+    val sublists: MutableList<MutableListLevel> = mutableListOf(),
+)
+
+private fun MutableListLevel.freeze(): MdBlock.ListBlock = MdBlock.ListBlock(
+    ordered = ordered,
+    startNumber = startNumber,
+    items = items.map { it.freeze() },
+)
+
+private fun MutableListItem.freeze(): ListItemNode = ListItemNode(
+    inline = inline,
+    sublists = sublists.map { it.freeze() },
+)
+
+/**
  * Splits a flat token stream into paragraph groups following CommonMark soft-break rules:
  *  - A run of **two or more** consecutive [MdToken.Newline]s ends a paragraph (blank-line
  *    separator). Any number of newlines ≥ 2 collapses to a single paragraph break.
  *  - A **single** [MdToken.Newline] is a soft break — rendered as a space so wrapped text joins
  *    across the line instead of breaking.
- *  - Block-level tokens ([MdToken.Heading], [MdToken.CodeBlock], [MdToken.DisplayMath]) always
- *    start their own group and act as implicit paragraph breaks.
+ *  - Block-level tokens ([MdToken.Heading], [MdToken.CodeBlock], [MdToken.DisplayMath],
+ *    [MdToken.ListItem]) always start their own group and act as implicit paragraph breaks.
+ *
+ * [MdToken.ListItem] is special-cased: consecutive items with no intervening blank line go into
+ * the **same** group (so the renderer can build one list tree from them). A single newline
+ * between two list items is dropped (no space inserted) — list items are visual blocks, not
+ * soft-wrapped text. A non-ListItem token following a list group flushes it (so a paragraph
+ * immediately after a list isn't glued onto the last item).
  *
  * A single newline at a block boundary (when the current group is empty) is dropped so it doesn't
  * introduce a leading space in the next paragraph.
@@ -149,6 +274,13 @@ internal fun groupIntoParagraphs(tokens: List<MdToken>): List<List<MdToken>> {
     while (i < tokens.size) {
         val tok = tokens[i]
         when (tok) {
+            is MdToken.ListItem -> {
+                // If the current group isn't already a list, flush it — list items never mix
+                // with regular inline text in one group.
+                val currentIsList = current.firstOrNull() is MdToken.ListItem
+                if (!currentIsList) flush()
+                current += tok
+            }
             is MdToken.Heading, is MdToken.CodeBlock, is MdToken.DisplayMath -> {
                 flush()
                 groups += mutableListOf(tok)
@@ -160,12 +292,21 @@ internal fun groupIntoParagraphs(tokens: List<MdToken>): List<List<MdToken>> {
                 val next = tokens.getOrNull(i + run)
                 val nextIsBlock =
                     next is MdToken.Heading || next is MdToken.CodeBlock || next is MdToken.DisplayMath
+                val currentIsList = current.firstOrNull() is MdToken.ListItem
+                val nextIsListItem = next is MdToken.ListItem
                 when {
                     // Blank line (2+ newlines) → paragraph break.
                     run >= 2 -> flush()
-                    // Single newline immediately before a block-level token → paragraph break
-                    // (don't seed a trailing space; the block token flushes its own group).
-                    nextIsBlock -> flush()
+                    // Single newline immediately before a block-level token, or before a list
+                    // item when we're NOT already inside a list group → paragraph break. Don't
+                    // seed a trailing space; the block / list token flushes its own group.
+                    nextIsBlock || (nextIsListItem && !currentIsList) -> flush()
+                    // Inside a list and the next non-newline token is another list item → drop
+                    // the newline entirely. List items are visual blocks, not soft-wrapped text.
+                    currentIsList && nextIsListItem -> { /* drop newline */ }
+                    // List group ended (next is inline text, not a list item) → flush so the
+                    // trailing paragraph isn't glued onto the last item as a soft-break space.
+                    currentIsList && next != null -> flush()
                     // Single newline between two inline runs → CommonMark soft break (space).
                     current.isNotEmpty() && next != null -> current += MdToken.Plain(" ")
                     // else: single newline at block boundary or end of input → drop.
@@ -173,7 +314,12 @@ internal fun groupIntoParagraphs(tokens: List<MdToken>): List<List<MdToken>> {
                 i += run
                 continue
             }
-            else -> current += tok
+            else -> {
+                // Non-list inline token (Plain, Bold, …) — if we were in a list group, flush it
+                // so the new paragraph starts fresh.
+                if (current.firstOrNull() is MdToken.ListItem) flush()
+                current += tok
+            }
         }
         i++
     }
@@ -249,6 +395,7 @@ private fun RenderMarkdownStream(
                 }
                 is MdBlock.Code -> RenderCodeBlock(block.token, styles)
                 is MdBlock.DisplayMath -> RenderDisplayMath(block.content, styles)
+                is MdBlock.ListBlock -> RenderList(block, styles, depth = 0)
             }
         }
     }
@@ -402,6 +549,84 @@ private fun RenderDisplayMath(content: String, styles: MarkdownStyles) {
 }
 
 /**
+ * Renders a list (ordered or unordered). Each item is laid out as a [Row]: a fixed-width marker
+ * column on the left (e.g. `•`, `1.`, `10.`) and the item's inline content on the right.
+ *
+ * Nested lists (sublists on an item) are rendered indented under that item. Indentation per
+ * level is `12.dp` — enough to visually distinguish nesting without consuming too much
+ * horizontal space on a phone screen.
+ *
+ * For ordered lists, the marker number is `startNumber + index` so a list that starts with `3.`
+ * continues `3.`, `4.`, `5.`, … (matching the leading number, not the position).
+ *
+ * Marker column width: `20.dp` for unordered (single `•`), and `28.dp` for ordered to fit up to
+ * two-digit numbers (`99.`). Larger numbers (three+ digits) clip; that's an acceptable edge case.
+ *
+ * The item's inline content may itself contain math (`$…$`) — handled via [RenderInlineRunWithMath]
+ * when present, falling back to a plain [Text] otherwise. This mirrors how [planBlocks] renders
+ * top-level paragraphs, so list items get the same inline capabilities as body text.
+ *
+ * @param depth current nesting depth — 0 for a top-level list, increments by 1 per sublist. Used
+ *   only to drive the left-padding of the whole list block.
+ */
+@Composable
+private fun RenderList(block: MdBlock.ListBlock, styles: MarkdownStyles, depth: Int) {
+    val baseStyle = LocalTextStyle.current
+    val markerWidth = if (block.ordered) 28.dp else 20.dp
+    val indentPerLevel = 12.dp
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = indentPerLevel * depth),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        block.items.forEachIndexed { index, item ->
+            val markerText = if (block.ordered) {
+                "${block.startNumber + index}."
+            } else {
+                "•"
+            }
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = markerText,
+                    modifier = Modifier.width(markerWidth),
+                    style = baseStyle,
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    RenderItemInline(item.inline, styles)
+                    for (sublist in item.sublists) {
+                        RenderList(sublist, styles, depth = depth + 1)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Renders an item's inline content — same logic [planBlocks] uses for a top-level paragraph: if
+ * any inline math token is present, route through [RenderInlineRunWithMath] so equations sit
+ * inline with the surrounding words; otherwise emit a plain [Text] with the assembled
+ * [AnnotatedString]. Empty inline (e.g. an empty `-` line) renders nothing.
+ */
+@Composable
+private fun RenderItemInline(tokens: List<MdToken>, styles: MarkdownStyles) {
+    val hasMath = tokens.any { it is MdToken.InlineMath }
+    if (hasMath) {
+        RenderInlineRunWithMath(buildInlineSegments(tokens, styles), styles)
+    } else {
+        val annotated = buildAnnotatedFromInline(tokens, styles)
+        if (annotated.length > 0) Text(text = annotated)
+    }
+}
+
+/**
  * Font-size multiplier for a heading level relative to the ambient body font size. Mirrors the
  * common Markdown/HTML convention: `#` is largest, `######` is below body size.
  */
@@ -435,6 +660,10 @@ internal fun buildAnnotatedFromInline(tokens: List<MdToken>, styles: MarkdownSty
                 ) { append(tok.label) }
                 is MdToken.Heading -> withStyle(styles.heading) { append(tok.text) }
                 is MdToken.CodeBlock, MdToken.Newline -> { /* block-level — handled by the caller */ }
+                // List items are block-level — routed to [buildListBlock] by [planBlocks]. Should
+                // never reach this inline-assembly path; emit nothing so they're not rendered as
+                // raw `toString()` text.
+                is MdToken.ListItem -> { /* block-level — handled by [RenderList] */ }
                 // Math tokens are rendered as dedicated blocks by [planBlocks]. They should never
                 // reach this inline-assembly path; if they do, emit raw content so no characters
                 // are silently dropped.

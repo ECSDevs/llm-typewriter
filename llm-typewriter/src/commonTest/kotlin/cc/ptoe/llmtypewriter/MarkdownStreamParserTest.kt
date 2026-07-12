@@ -319,4 +319,261 @@ class MarkdownStreamParserTest {
         // Closed form.
         assertEquals(listOf(MdToken.InlineMath("x^2", closed = true)), parseStreamingMarkdown(full))
     }
+
+    // --- Lists ---
+
+    @Test
+    fun unorderedList_dash() {
+        val tokens = parseStreamingMarkdown("- a\n- b\n- c")
+        assertEquals(
+            listOf(
+                MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("a"))),
+                MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("b"))),
+                MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("c"))),
+            ),
+            tokens,
+        )
+    }
+
+    @Test
+    fun unorderedList_star() {
+        val tokens = parseStreamingMarkdown("* a\n* b")
+        assertEquals(2, tokens.size)
+        assertTrue(tokens.all { it is MdToken.ListItem && !it.ordered })
+    }
+
+    @Test
+    fun unorderedList_plus() {
+        val tokens = parseStreamingMarkdown("+ a\n+ b")
+        assertEquals(2, tokens.size)
+        assertTrue(tokens.all { it is MdToken.ListItem && !it.ordered })
+    }
+
+    @Test
+    fun orderedList_dot() {
+        val tokens = parseStreamingMarkdown("1. first\n2. second\n3. third")
+        assertEquals(
+            listOf(
+                MdToken.ListItem(ordered = true, number = 1, indent = 0, inline = listOf(MdToken.Plain("first"))),
+                MdToken.ListItem(ordered = true, number = 2, indent = 0, inline = listOf(MdToken.Plain("second"))),
+                MdToken.ListItem(ordered = true, number = 3, indent = 0, inline = listOf(MdToken.Plain("third"))),
+            ),
+            tokens,
+        )
+    }
+
+    @Test
+    fun orderedList_paren() {
+        // `1)` form is also a valid ordered-list marker (CommonMark).
+        val tokens = parseStreamingMarkdown("1) one\n2) two")
+        assertEquals(2, tokens.size)
+        assertTrue(tokens.all { it is MdToken.ListItem && it.ordered })
+        assertEquals(1, (tokens[0] as MdToken.ListItem).number)
+        assertEquals(2, (tokens[1] as MdToken.ListItem).number)
+    }
+
+    @Test
+    fun orderedList_nonSequentialNumbers_preserved() {
+        // CommonMark lets the starting number be anything; the renderer preserves it. (Subsequent
+        // items re-number from the start, but the parser just records each marker's literal
+        // number.)
+        val tokens = parseStreamingMarkdown("3. third\n4. fourth")
+        assertEquals(3, (tokens[0] as MdToken.ListItem).number)
+        assertEquals(4, (tokens[1] as MdToken.ListItem).number)
+    }
+
+    @Test
+    fun listItem_inlineFormattingParsed() {
+        // Bold + inline code inside a list item — the item's inline content is recursively parsed.
+        val tokens = parseStreamingMarkdown("- **bold** and `code`")
+        val item = tokens.single() as MdToken.ListItem
+        assertEquals(
+            listOf(MdToken.Bold("bold"), MdToken.Plain(" and "), MdToken.InlineCode("code")),
+            item.inline,
+        )
+    }
+
+    @Test
+    fun listItem_inlineMathParsed() {
+        val tokens = parseStreamingMarkdown("- formula: \$x^2\$")
+        val item = tokens.single() as MdToken.ListItem
+        assertEquals(
+            listOf(MdToken.Plain("formula: "), MdToken.InlineMath("x^2", closed = true)),
+            item.inline,
+        )
+    }
+
+    @Test
+    fun listItem_indented_nestingLevelOne() {
+        // Two-space indent → indent level 1.
+        val tokens = parseStreamingMarkdown("- parent\n  - child")
+        val parent = tokens[0] as MdToken.ListItem
+        val child = tokens[1] as MdToken.ListItem
+        assertEquals(0, parent.indent)
+        assertEquals(1, child.indent)
+    }
+
+    @Test
+    fun listItem_indented_nestingLevelTwo() {
+        // Four-space indent → indent level 2.
+        val tokens = parseStreamingMarkdown("- a\n  - b\n    - c")
+        assertEquals(0, (tokens[0] as MdToken.ListItem).indent)
+        assertEquals(1, (tokens[1] as MdToken.ListItem).indent)
+        assertEquals(2, (tokens[2] as MdToken.ListItem).indent)
+    }
+
+    @Test
+    fun listItem_singleSpaceIndent_treatedAsLevelZero() {
+        // A single leading space rounds down to indent 0 (one-space indents are non-standard but
+        // should not be misread as a deeper nesting level).
+        val tokens = parseStreamingMarkdown("- a\n - b")
+        assertEquals(0, (tokens[1] as MdToken.ListItem).indent)
+    }
+
+    @Test
+    fun listItem_emptyContent() {
+        // `- ` (dash + space, end of line) — empty item.
+        val tokens = parseStreamingMarkdown("- \n- b")
+        val first = tokens[0] as MdToken.ListItem
+        assertEquals(emptyList<MdToken>(), first.inline)
+    }
+
+    @Test
+    fun listItem_markerAtEndOfInput_noSpace() {
+        // `-` alone at end of input — empty item (matches CommonMark "marker followed by EOL").
+        val tokens = parseStreamingMarkdown("-")
+        val item = tokens.single() as MdToken.ListItem
+        assertEquals(emptyList<MdToken>(), item.inline)
+    }
+
+    @Test
+    fun listItem_orderedEmpty_atEndOfInput() {
+        // `1.` at end of input — empty ordered item.
+        val tokens = parseStreamingMarkdown("1.")
+        val item = tokens.single() as MdToken.ListItem
+        assertTrue(item.ordered)
+        assertEquals(1, item.number)
+        assertEquals(emptyList<MdToken>(), item.inline)
+    }
+
+    @Test
+    fun listItem_markerWithoutSpace_notAList() {
+        // `1.text` — no space after `.` → not a list marker; falls through to plain text.
+        // Important so dates and version numbers (`2024.01.01`) don't false-positive.
+        val tokens = parseStreamingMarkdown("1.text")
+        assertTrue(tokens.none { it is MdToken.ListItem })
+        assertTrue(tokens.any { it is MdToken.Plain })
+    }
+
+    @Test
+    fun listItem_dashWithoutSpace_notAList() {
+        // `-text` — no space after `-` → not a list marker.
+        val tokens = parseStreamingMarkdown("-text")
+        assertTrue(tokens.none { it is MdToken.ListItem })
+    }
+
+    @Test
+    fun listItem_threeDashes_notAList() {
+        // `---` is a horizontal rule in CommonMark, not a list. Our parser doesn't support HR, so
+        // it should fall through to plain text (not be misparsed as a list with content `-`).
+        val tokens = parseStreamingMarkdown("---")
+        assertTrue(tokens.none { it is MdToken.ListItem })
+    }
+
+    @Test
+    fun listItem_dateNotOrdered() {
+        // `2024.01.01` — looks like `\d+.` but no space after, so not an ordered list marker.
+        val tokens = parseStreamingMarkdown("2024.01.01")
+        assertTrue(tokens.none { it is MdToken.ListItem })
+        assertTrue(tokens.any { it is MdToken.Plain && it.text == "2024.01.01" })
+    }
+
+    @Test
+    fun listItem_midLineDash_isPlain() {
+        // A `-` mid-line is plain text, not a list marker (list markers only fire at line start).
+        val tokens = parseStreamingMarkdown("text - more")
+        assertEquals(listOf(MdToken.Plain("text - more")), tokens)
+    }
+
+    @Test
+    fun listItem_followedByParagraph() {
+        // List followed by a paragraph (blank-line separated) — the paragraph shouldn't be glued
+        // onto the last item. Note: the parser consumes the list item's trailing newline (so
+        // consecutive items chain without an intervening Newline), so a blank line between the
+        // item and the paragraph yields ONE Newline token, not two.
+        val tokens = parseStreamingMarkdown("- item\n\nAfter list.")
+        assertEquals(
+            listOf(
+                MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("item"))),
+                MdToken.Newline,
+                MdToken.Plain("After list."),
+            ),
+            tokens,
+        )
+    }
+
+    @Test
+    fun listItem_interruptsParagraph() {
+        // A list can interrupt a paragraph (no blank line needed) — CommonMark behavior.
+        val tokens = parseStreamingMarkdown("Some text\n- item")
+        assertEquals(
+            listOf(
+                MdToken.Plain("Some text"),
+                MdToken.Newline,
+                MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("item"))),
+            ),
+            tokens,
+        )
+    }
+
+    @Test
+    fun prefixStability_growingListItem() {
+        // As the item's line grows, the ListItem token's inline content grows — but the token
+        // list structure (one ListItem) stays stable, and the inline prefix is itself
+        // prefix-stable (the leading Plain stays Plain).
+        val full = "- hello **world**"
+        listOf(7, 10, 13, 17).forEach { len ->
+            val toks = parseStreamingMarkdown(full.substring(0, len))
+            assertTrue(toks.first() is MdToken.ListItem, "len=$len: expected leading ListItem, got ${toks.firstOrNull()}")
+            val item = toks.first() as MdToken.ListItem
+            // The inline content's first token should be Plain starting with "hello" (or shorter
+            // prefix as it grows). Never re-classifies earlier inline tokens.
+            val firstInline = item.inline.firstOrNull()
+            assertTrue(firstInline is MdToken.Plain, "len=$len: expected leading Plain inline, got $firstInline")
+        }
+        // Closed form has the bold broken out cleanly.
+        val finalItem = parseStreamingMarkdown(full).single() as MdToken.ListItem
+        assertEquals(
+            listOf(MdToken.Plain("hello "), MdToken.Bold("world")),
+            finalItem.inline,
+        )
+    }
+
+    @Test
+    fun prefixStability_growingOrderedNumber() {
+        // Streaming `1. item` char-by-char: while we're still in the digits, the parser shouldn't
+        // commit to a ListItem until the `.` and space arrive. But once they do, the token list
+        // stays as a single ListItem with growing inline content.
+        val full = "1. hello"
+        // At len=1 ("1") it's just a digit, no list yet.
+        assertEquals(1, parseStreamingMarkdown("1").size)
+        // At len=2 ("1.") it's an empty ordered list item.
+        val atDot = parseStreamingMarkdown("1.")
+        assertTrue(atDot.single() is MdToken.ListItem)
+        // At full input, it's a populated list item.
+        val atFull = parseStreamingMarkdown(full).single() as MdToken.ListItem
+        assertEquals(listOf(MdToken.Plain("hello")), atFull.inline)
+    }
+
+    @Test
+    fun listItem_firesBeforeInlineStarParsing() {
+        // `* item` should be a list item, not the start of italic emphasis. Confirms the list
+        // detection wins over the inline `*` branch when at line start.
+        val tokens = parseStreamingMarkdown("* item")
+        assertTrue(tokens.single() is MdToken.ListItem)
+        // And `*item*` (no space) is still italic — list detection correctly rejects it.
+        val italic = parseStreamingMarkdown("*item*")
+        assertTrue(italic.any { it is MdToken.Italic })
+        assertTrue(italic.none { it is MdToken.ListItem })
+    }
 }
