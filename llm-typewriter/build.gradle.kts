@@ -118,6 +118,13 @@ mavenPublishing {
             }
         }
         developers {
+            // Upstream author of llm-typewriter (this project is a fork — see
+            // README "Credits" and LICENSE for the full attribution notice).
+            developer {
+                id.set("NadeemIqbal")
+                name.set("NadeemIqbal")
+                url.set("https://github.com/NadeemIqbal")
+            }
             developer {
                 id.set("originalFactor")
                 name.set("originalFactor")

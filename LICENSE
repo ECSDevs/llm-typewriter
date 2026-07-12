@@ -199,3 +199,23 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+   ------------------------------------------------------------------------
+
+   This project is a fork of llm-typewriter by NadeemIqbal:
+       https://github.com/NadeemIqbal/llm-typewriter
+
+   Copyright (c) 2026 NadeemIqbal and contributors.
+
+   The upstream project is licensed under the Apache License, Version 2.0.
+   Portions of this codebase originally authored by NadeemIqbal are
+   retained under their original Apache 2.0 license; modifications made
+   in this fork are licensed under Apache 2.0 by the current maintainers.
+
+   This fork detached from the upstream GitHub fork network because of
+   substantial divergence — the project now targets Android only, adds
+   streaming LaTeX math rendering (via AndroidMath), incremental
+   prefix-stable Markdown parsing, performance work, and other changes
+   that make it a distinct library. Upstream attribution is preserved
+   here and in the published POM; see the README "Credits" section for
+   details.
