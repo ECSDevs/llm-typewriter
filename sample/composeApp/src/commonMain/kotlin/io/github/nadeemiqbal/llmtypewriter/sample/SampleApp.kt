@@ -129,7 +129,7 @@ private val FakeResponses = listOf(
 @Composable
 private fun DemoScreen() {
     val state = rememberStreamingTypewriterState()
-    val markdownRenderer = rememberMarkdownTypewriterRenderer()
+    val markdownRenderer = rememberMarkdownTypewriterRenderer(state)
 
     val tokenChannel = remember { MutableSharedFlow<String>(extraBufferCapacity = 64) }
     val scope = rememberCoroutineScope()

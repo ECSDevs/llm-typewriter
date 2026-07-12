@@ -61,15 +61,23 @@ val PlainTypewriterRenderer: TypewriterRenderer = TypewriterRenderer { text, mod
  *
  * The renderer never reflows already-painted content because [parseStreamingMarkdown] is
  * prefix-stable: the same prefix of input always yields the same prefix of tokens.
+ *
+ * Pass the owning [state] so the renderer can use [StreamingTypewriterState.revealedTokens]
+ * (incrementally cached) instead of re-parsing the whole revealed string on every recomposition.
  */
 @Composable
 fun rememberMarkdownTypewriterRenderer(
+    state: StreamingTypewriterState,
     styles: MarkdownStyles = LlmTypewriterDefaults.markdownStyles(),
-): TypewriterRenderer = remember(styles) { MarkdownTypewriterRenderer(styles) }
+): TypewriterRenderer = remember(state, styles) { MarkdownTypewriterRenderer(state, styles) }
 
 /** Direct factory of a Markdown renderer for callers that want to pass styles manually. */
-fun MarkdownTypewriterRenderer(styles: MarkdownStyles): TypewriterRenderer =
-    TypewriterRenderer { text, modifier -> RenderMarkdownStream(text, styles, modifier) }
+fun MarkdownTypewriterRenderer(
+    state: StreamingTypewriterState,
+    styles: MarkdownStyles,
+): TypewriterRenderer = TypewriterRenderer { text, modifier ->
+    RenderMarkdownStream(text, state, styles, modifier)
+}
 
 /**
  * A block of layout for the markdown renderer to paint sequentially. Pre-built outside the
@@ -206,10 +214,18 @@ private fun buildInlineSegments(tokens: List<MdToken>, styles: MarkdownStyles): 
 @Composable
 private fun RenderMarkdownStream(
     text: String,
+    state: StreamingTypewriterState,
     styles: MarkdownStyles,
     modifier: Modifier,
 ) {
-    val blocks = remember(text, styles) { planBlocks(parseStreamingMarkdown(text), styles) }
+    // Use the state's incrementally-cached tokens rather than re-parsing `text` from scratch.
+    // Keying on the tokens list *reference* (not `text`) means non-streaming recompositions
+    // (scroll, theme switch, cursor blink) hit the cache and skip planBlocks entirely —
+    // revealedTokens() returns the same List instance when the revealed length is unchanged.
+    // `text` still drives recomposition from the caller (state.revealed read) so new chars
+    // still invalidate; it's just no longer substring-compared each frame.
+    val tokens = state.revealedTokens()
+    val blocks = remember(tokens, styles) { planBlocks(tokens, styles) }
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(4.dp),

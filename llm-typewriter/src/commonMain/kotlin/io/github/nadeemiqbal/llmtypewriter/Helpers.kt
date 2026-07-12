@@ -27,20 +27,3 @@ fun wordTokenFlowOf(text: String, perTokenDelayMs: Long = 80L): Flow<String> = f
         emit(if (index == parts.lastIndex) word else "$word ")
     }
 }
-
-/**
- * Used by [CyclingTypewriterText] — drops the last revealed character without touching the buffer.
- * This is a hack: the state's revealed/buffer relationship is normally append-only, so to support
- * the cycling delete animation we shrink both at once.
- */
-internal fun StreamingTypewriterState.deleteLastRevealed() {
-    // The simplest way to delete-and-resync is to reset and re-append the prefix. This is fine
-    // for the small phrase strings used in CyclingTypewriterText (no GC pressure).
-    val cur = revealed
-    if (cur.isEmpty()) return
-    val truncated = cur.substring(0, cur.length - 1)
-    reset()
-    appendToken(truncated)
-    // We don't want a streaming reveal of the truncated prefix — flush immediately.
-    skipToEnd()
-}

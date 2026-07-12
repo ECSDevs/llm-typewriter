@@ -316,7 +316,7 @@ private fun consumeLink(input: String, start: Int, out: MutableList<MdToken>): I
     return urlClose + 1
 }
 
-private fun mergeAdjacentPlain(input: List<MdToken>): List<MdToken> {
+internal fun mergeAdjacentPlain(input: List<MdToken>): List<MdToken> {
     if (input.size < 2) return input
     val out = mutableListOf<MdToken>()
     for (tok in input) {

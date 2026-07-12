@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- **`revealNext` no longer allocates a String per character.** The revealed text is now tracked
+  as an `Int` length into the append-only buffer; `revealed` is computed lazily on read. This
+  removes the O(N²) substring-allocation cost for an N-character stream (each of N reveal steps
+  previously copied an O(N) String).
+- **Streaming Markdown re-parse is now incremental.** `StreamingTypewriterState.revealedTokens()`
+  caches the parsed token list and, when the buffer grows and the trailing token is `Plain`,
+  re-parses only the small tail instead of the whole revealed string. Prefix-stability guarantees
+  the earlier tokens are unchanged, so the cache is safe. Removes the O(N²) re-parse cost.
+- **Math measurement is cached process-wide.** `measurePlatformMath` now backs its results with
+  an `LruCache` keyed on (latex, displayMode, fontSizePx), so a given equation is laid out at
+  most once for the app lifetime — across recompositions, Composable instances, and chat bubbles
+  — instead of once per recomposition per inline equation.
+- **`RenderPlatformMath` skips redundant `MTMathView` writes.** The `AndroidView.update` block
+  now only calls `setLatex` / `setLabelMode` / `setTextColor` / `setFontSize` when the value
+  actually changed, avoiding a full LaTeX re-parse on every recomposition during streaming.
+- **`planBlocks` skips non-streaming recompositions.** The block-plan `remember` key is now the
+  cached tokens list reference (stable across scroll / theme / cursor-blink recompositions) instead
+  of the revealed `String` (which changed every frame and forced a substring + planBlocks rebuild).
+- **`deleteLastRevealed` is O(1).** Previously walked the buffer copying chars; now just decrements
+  the length counter (same machinery as `revealNext`).
+
 ### Added
 - Mini LaTeX math renderer — inline `$…$` and display `$$…$$` math in the streaming Markdown.
   - `TexParser.kt` — prefix-stable lexer for TeX math fragments (`\command`, `{group}`,

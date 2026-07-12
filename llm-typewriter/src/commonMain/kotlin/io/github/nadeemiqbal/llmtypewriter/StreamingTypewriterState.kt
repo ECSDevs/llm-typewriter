@@ -40,10 +40,20 @@ class StreamingTypewriterState(
 
     private val buffer = StringBuilder()
 
-    private var revealedState by mutableStateOf("")
+    /**
+     * Number of characters revealed so far. Tracked as an Int (not a String) so each
+     * [revealNext] only writes a small snapshot value — the snapshot read+compare in the
+     * recomposition machinery is O(1) instead of O(N) per character. [revealed] is computed
+     * lazily from [buffer] + this length when the renderer reads it.
+     */
+    private var revealedLengthState by mutableStateOf(0)
 
     /** Text that has been revealed so far. Renderers consume this. */
-    val revealed: String get() = revealedState
+    val revealed: String
+        get() {
+            val len = revealedLengthState
+            return if (len == 0) "" else buffer.substring(0, len)
+        }
 
     private var phaseState by mutableStateOf(TypewriterPhase.Idle)
 
@@ -82,7 +92,7 @@ class StreamingTypewriterState(
         if (token.isEmpty()) return
         buffer.append(token)
         bufferSizeState = buffer.length
-        pendingCharsState = bufferSizeState - revealedState.length
+        pendingCharsState = bufferSizeState - revealedLengthState
         if (phaseState == TypewriterPhase.Idle || phaseState == TypewriterPhase.Waiting) {
             phaseState = TypewriterPhase.Revealing
         }
@@ -95,7 +105,7 @@ class StreamingTypewriterState(
     fun completeSource() {
         sourceCompleteState = true
         // If the reveal loop already caught up, flip immediately to Done.
-        if (revealedState.length >= buffer.length) phaseState = TypewriterPhase.Done
+        if (revealedLengthState >= buffer.length) phaseState = TypewriterPhase.Done
     }
 
     // ---- reveal-loop inputs ------------------------------------------------------------------
@@ -106,16 +116,18 @@ class StreamingTypewriterState(
      * [TypewriterPhase.Done] depending on whether the source has completed).
      */
     internal fun revealNext(): Char? {
-        val len = revealedState.length
+        val len = revealedLengthState
         if (len >= buffer.length) {
             phaseState = if (sourceCompleteState) TypewriterPhase.Done else TypewriterPhase.Waiting
             pendingCharsState = 0
             return null
         }
         val ch = buffer[len]
-        revealedState = buffer.substring(0, len + 1)
-        pendingCharsState = buffer.length - revealedState.length
-        if (revealedState.length >= buffer.length) {
+        // Only bump an Int — no String allocation. The renderer reads `revealed` lazily on its
+        // own snapshot frame and pays the substring cost once per recomposition.
+        revealedLengthState = len + 1
+        pendingCharsState = buffer.length - revealedLengthState
+        if (revealedLengthState >= buffer.length) {
             phaseState = if (sourceCompleteState) TypewriterPhase.Done else TypewriterPhase.Waiting
         } else {
             phaseState = TypewriterPhase.Revealing
@@ -124,7 +136,11 @@ class StreamingTypewriterState(
     }
 
     /** The character that was most recently revealed (used by [SpeedCurve]). */
-    internal val lastRevealed: Char? get() = revealedState.lastOrNull()
+    internal val lastRevealed: Char?
+        get() {
+            val len = revealedLengthState
+            return if (len == 0) null else buffer[len - 1]
+        }
 
     // ---- control surface ---------------------------------------------------------------------
 
@@ -134,8 +150,8 @@ class StreamingTypewriterState(
      * [TypewriterPhase.Done]; otherwise [TypewriterPhase.Waiting].
      */
     fun skipToEnd() {
-        if (revealedState.length < buffer.length) {
-            revealedState = buffer.toString()
+        if (revealedLengthState < buffer.length) {
+            revealedLengthState = buffer.length
             pendingCharsState = 0
         }
         phaseState = if (sourceCompleteState) TypewriterPhase.Done else TypewriterPhase.Waiting
@@ -154,7 +170,7 @@ class StreamingTypewriterState(
     fun resume() {
         if (phaseState != TypewriterPhase.Stopped) return
         phaseState = when {
-            revealedState.length < buffer.length -> TypewriterPhase.Revealing
+            revealedLengthState < buffer.length -> TypewriterPhase.Revealing
             sourceCompleteState -> TypewriterPhase.Done
             else -> TypewriterPhase.Waiting
         }
@@ -167,11 +183,113 @@ class StreamingTypewriterState(
      */
     fun reset() {
         buffer.clear()
-        revealedState = ""
+        revealedLengthState = 0
         sourceCompleteState = false
         bufferSizeState = 0
         pendingCharsState = 0
         phaseState = TypewriterPhase.Idle
+        invalidateTokensCache()
+    }
+
+    /**
+     * Drops the last revealed character without touching the buffer. Used by
+     * [CyclingTypewriterText]'s delete animation. O(1) — just decrements the length counter.
+     */
+    internal fun deleteLastRevealed() {
+        if (revealedLengthState == 0) return
+        revealedLengthState -= 1
+        pendingCharsState = buffer.length - revealedLengthState
+        // Make sure the reveal loop is running so the next append animates again — but only flip
+        // up if we're not already mid-reveal. If phase is Stopped/Done, leave it; CyclingTypewriter
+        // doesn't use those phases anyway.
+        if (phaseState == TypewriterPhase.Waiting || phaseState == TypewriterPhase.Idle) {
+            phaseState = if (buffer.length > revealedLengthState) TypewriterPhase.Revealing else phaseState
+        }
+        invalidateTokensCache()
+    }
+
+    // ---- incremental markdown parse cache -------------------------------------------------
+    //
+    // The renderer re-parses `revealed` on every recomposition. Without caching that's O(N) per
+    // character → O(N²) total for an N-character stream. We exploit two facts:
+    //   1. The buffer is append-only between [reset] / [deleteLastRevealed] calls, so once we've
+    //      parsed length L, the prefix [0, L) is guaranteed to still match.
+    //   2. [parseStreamingMarkdown] is prefix-stable: tokens before the last one never change.
+    // So when the last token is a [MdToken.Plain] (the common streaming tail), we can drop only
+    // that token and re-parse the small tail starting at its original buffer position. The prefix
+    // check is O(1) (just a length comparison), and the tail is typically one plain word + the
+    // newly revealed character — O(1) in practice.
+
+    private var lastParsedLen: Int = -1
+    private var lastParsedTokens: List<MdToken> = emptyList()
+
+    private fun invalidateTokensCache() {
+        lastParsedLen = -1
+        lastParsedTokens = emptyList()
+    }
+
+    /**
+     * Returns [parseStreamingMarkdown] applied to [revealed], incrementally cached. Callers that
+     * re-render on every recomposition (the Markdown renderer) should prefer this over parsing
+     * the string themselves — it avoids the O(N²) re-parse cost for an N-character stream.
+     */
+    fun revealedTokens(): List<MdToken> {
+        val len = revealedLengthState
+        // Cache hit — same length, buffer unchanged since last parse.
+        if (len == lastParsedLen) return lastParsedTokens
+
+        // Incremental path: buffer grew (append-only) and the trailing token is a Plain run.
+        // Prefix-stability guarantees all tokens except the last are unchanged, so we drop the
+        // last Plain token and re-parse only from its start position to the new tail.
+        if (len > lastParsedLen && lastParsedLen >= 0 && lastParsedTokens.isNotEmpty()) {
+            val lastToken = lastParsedTokens.last()
+            if (lastToken is MdToken.Plain) {
+                val lastTokenStart = lastParsedLen - lastToken.text.length
+                val tailTokens = parseStreamingMarkdown(buffer.substring(lastTokenStart, len))
+                val newTokens = concatAndMerge(
+                    stable = lastParsedTokens, stableKeep = lastParsedTokens.size - 1,
+                    tail = tailTokens,
+                )
+                lastParsedLen = len
+                lastParsedTokens = newTokens
+                return newTokens
+            }
+        }
+
+        // Full parse — cache miss, buffer shrank, or last token wasn't Plain.
+        val tokens = parseStreamingMarkdown(buffer.substring(0, len))
+        lastParsedLen = len
+        lastParsedTokens = tokens
+        return tokens
+    }
+
+    /**
+     * Concatenates the first [stableKeep] tokens of [stable] with all of [tail], merging any
+     * adjacent Plain tokens across the boundary. Avoids re-traversing the stable prefix's
+     * interior (the prefix is already merged from a prior pass).
+     */
+    private fun concatAndMerge(
+        stable: List<MdToken>,
+        stableKeep: Int,
+        tail: List<MdToken>,
+    ): List<MdToken> {
+        if (stableKeep == 0 && tail.isEmpty()) return emptyList()
+        if (stableKeep == 0) return mergeAdjacentPlain(tail)
+        if (tail.isEmpty()) {
+            return if (stableKeep == stable.size) stable else stable.subList(0, stableKeep)
+        }
+        val out = ArrayList<MdToken>(stableKeep + tail.size)
+        for (i in 0 until stableKeep) out.add(stable[i])
+        // Boundary merge: if the last kept token and the first tail token are both Plain, fuse them.
+        val lastKept = out.last()
+        val firstTail = tail.first()
+        if (lastKept is MdToken.Plain && firstTail is MdToken.Plain) {
+            out[out.lastIndex] = MdToken.Plain(lastKept.text + firstTail.text)
+            for (i in 1 until tail.size) out.add(tail[i])
+        } else {
+            for (i in 0 until tail.size) out.add(tail[i])
+        }
+        return out
     }
 }
 
