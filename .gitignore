@@ -23,6 +23,10 @@ captures/
 *.aab
 *.ap_
 
+# Signing keystores — never commit
+*.jks
+*.keystore
+
 # Xcode / iOS
 xcuserdata/
 *.xcworkspace/xcuserdata/

@@ -45,13 +45,28 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Assemble debug APK
-        run: ./gradlew :sample:androidApp:assembleDebug --stacktrace
+      - name: Decode signing keystore
+        env:
+          SAMPLE_SIGNING_KEYSTORE_BASE64: ${{ secrets.SAMPLE_SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          echo "$SAMPLE_SIGNING_KEYSTORE_BASE64" | base64 -d > keystore.jks
+          if [ ! -s keystore.jks ]; then
+            echo "::error::keystore.jks is empty — secret SAMPLE_SIGNING_KEYSTORE_BASE64 is missing or invalid"
+            exit 1
+          fi
 
-      - name: Upload debug APK
+      - name: Assemble release APK
+        env:
+          SAMPLE_STORE_FILE: ${{ github.workspace }}/keystore.jks
+          SAMPLE_STORE_PASSWORD: ${{ secrets.SAMPLE_STORE_PASSWORD }}
+          SAMPLE_KEY_ALIAS: ${{ secrets.SAMPLE_KEY_ALIAS }}
+          SAMPLE_KEY_PASSWORD: ${{ secrets.SAMPLE_KEY_PASSWORD }}
+        run: ./gradlew :sample:androidApp:assembleRelease --stacktrace
+
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: sample-app-debug-apk
-          path: sample/androidApp/build/outputs/apk/debug/*.apk
+          name: sample-app-release-apk
+          path: sample/androidApp/build/outputs/apk/release/*.apk
           retention-days: 14
           if-no-files-found: error

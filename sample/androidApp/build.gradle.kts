@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -10,6 +11,13 @@ plugins {
 kotlin {
     compilerOptions { jvmTarget.set(JvmTarget.JVM_11) }
 }
+
+// 签名密钥配置：CI 环境变量优先，本地 local.properties 兜底
+val localProps = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use(::load)
+}
+fun signProp(name: String): String? =
+    System.getenv(name) ?: localProps.getProperty(name)
 
 android {
     namespace = "cc.ptoe.llmtypewriter.sample.android"
@@ -23,10 +31,22 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = signProp("SAMPLE_STORE_FILE")?.let { rootProject.file(it) }
+            storePassword = signProp("SAMPLE_STORE_PASSWORD")
+            keyAlias = signProp("SAMPLE_KEY_ALIAS")
+            keyPassword = signProp("SAMPLE_KEY_PASSWORD")
+        }
+    }
+
     buildFeatures { compose = true }
 
     buildTypes {
-        getByName("release") { isMinifyEnabled = false }
+        getByName("release") {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
+        }
     }
 
     compileOptions {
