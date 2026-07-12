@@ -6,15 +6,15 @@ build up as tokens arrive, three speed curves (linear / ease-out / natural), a c
 blinking cursor, tap-to-skip, graceful stop-mid-stream, selectable text, and a screen-reader-
 friendly live region.
 
-[![Maven Central](https://img.shields.io/maven-central/v/io.github.nadeemiqbal/llm-typewriter)](https://central.sonatype.com/artifact/io.github.nadeemiqbal/llm-typewriter)
+[![Maven Central](https://img.shields.io/maven-central/v/cc.ptoe/llm-typewriter)](https://central.sonatype.com/artifact/cc.ptoe/llm-typewriter)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Build](https://github.com/NadeemIqbal/llm-typewriter/actions/workflows/build.yml/badge.svg)](https://github.com/NadeemIqbal/llm-typewriter/actions/workflows/build.yml)
+[![Build](https://github.com/ECSDevs/llm-typewriter/actions/workflows/build.yml/badge.svg)](https://github.com/ECSDevs/llm-typewriter/actions/workflows/build.yml)
 
 <p align="center">
   <img src="docs/hero.gif" width="320" alt="LlmTypewriter streaming a markdown response with a syntax-highlighted Kotlin code block on Android" />
 </p>
 
-> **Pairs naturally with [`prompt-bar`](https://github.com/NadeemIqbal/prompt-bar)** — drop both in and you have a ChatGPT-quality chat UI on Android in ~20 lines. PromptBar's Send/Stop button auto-syncs with `state.isStreaming`.
+> **Pairs naturally with [`prompt-bar`](https://github.com/ECSDevs/prompt-bar)** — drop both in and you have a ChatGPT-quality chat UI on Android in ~20 lines. PromptBar's Send/Stop button auto-syncs with `state.isStreaming`.
 
 ## Why another typewriter?
 
@@ -41,7 +41,7 @@ shipped:
 ```kotlin
 // settings.gradle.kts — already on Maven Central, no extra repos.
 dependencies {
-    implementation("io.github.nadeemiqbal:llm-typewriter:0.1.0")
+    implementation("cc.ptoe:llm-typewriter:0.1.0")
 }
 ```
 

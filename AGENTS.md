@@ -15,9 +15,9 @@ Guidance for AI coding agents working in this repository. Read this before makin
 a live, progressively-revealed typewriter with streaming Markdown, syntax-highlighted code
 blocks, speed curves, cursors, tap-to-skip, graceful stop, and a11y live-region support.
 
-- Group / coordinates: `io.github.nadeemiqbal:llm-typewriter`
+- Group / coordinates: `cc.ptoe:llm-typewriter`
 - License: Apache 2.0
-- Repo: https://github.com/NadeemIqbal/llm-typewriter
+- Repo: https://github.com/ECSDevs/llm-typewriter
 
 ## Modules
 
@@ -48,7 +48,7 @@ from the tag (`v0.2.0` → `0.2.0`); override locally with `-Pversion=...`.
 
 ## Library source layout
 
-`llm-typewriter/src/commonMain/kotlin/io/github/nadeemiqbal/llmtypewriter/`:
+`llm-typewriter/src/commonMain/kotlin/cc/ptoe/llmtypewriter/`:
 
 | File | Responsibility |
 |---|---|
@@ -67,7 +67,7 @@ from the tag (`v0.2.0` → `0.2.0`); override locally with `-Pversion=...`.
 | `LlmTypewriterDefaults.kt` | Defaults — base delay, blink period, theme-derived styles. |
 | `Helpers.kt` | `staticFlowOf`, `wordTokenFlowOf`, internal helpers. |
 
-`llm-typewriter/src/androidMain/kotlin/io/github/nadeemiqbal/llmtypewriter/`:
+`llm-typewriter/src/androidMain/kotlin/cc/ptoe/llmtypewriter/`:
 
 | File | Responsibility |
 |---|---|

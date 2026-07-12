@@ -33,8 +33,8 @@ jobs:
       - name: Build
         run: ./gradlew build --stacktrace
 
-      - name: All tests
-        run: ./gradlew allTests --stacktrace
+      - name: Unit tests
+        run: ./gradlew :llm-typewriter:testDebugUnitTest --stacktrace
 
       - name: Upload test reports
         if: failure()

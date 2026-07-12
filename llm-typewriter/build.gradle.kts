@@ -18,7 +18,7 @@ val libVersion: String =
         ?.takeUnless { it.isBlank() || it == "unspecified" }
         ?: "0.1.0"
 
-group = "io.github.nadeemiqbal"
+group = "cc.ptoe"
 version = libVersion
 
 kotlin {
@@ -70,7 +70,7 @@ kotlin {
 }
 
 android {
-    namespace = "io.github.nadeemiqbal.llmtypewriter"
+    namespace = "cc.ptoe.llmtypewriter"
     compileSdk = libs.versions.compileSdk.get().toInt()
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInt()
@@ -97,7 +97,7 @@ mavenPublishing {
         signAllPublications()
     }
 
-    coordinates("io.github.nadeemiqbal", "llm-typewriter", libVersion)
+    coordinates("cc.ptoe", "llm-typewriter", libVersion)
 
     pom {
         name.set("LlmTypewriter")
@@ -109,7 +109,7 @@ mavenPublishing {
                 "graceful stop-mid-stream, selectable text, and screen-reader-friendly a11y.",
         )
         inceptionYear.set("2026")
-        url.set("https://github.com/NadeemIqbal/llm-typewriter")
+        url.set("https://github.com/ECSDevs/llm-typewriter")
         licenses {
             license {
                 name.set("The Apache License, Version 2.0")
@@ -119,16 +119,16 @@ mavenPublishing {
         }
         developers {
             developer {
-                id.set("NadeemIqbal")
-                name.set("Nadeem Iqbal")
-                email.set("mr_nadeem_iqbal@yahoo.com")
-                url.set("https://github.com/NadeemIqbal")
+                id.set("originalFactor")
+                name.set("originalFactor")
+                email.set("2438926613@qq.com")
+                url.set("https://github.com/originalFactor")
             }
         }
         scm {
-            url.set("https://github.com/NadeemIqbal/llm-typewriter")
-            connection.set("scm:git:git://github.com/NadeemIqbal/llm-typewriter.git")
-            developerConnection.set("scm:git:ssh://git@github.com/NadeemIqbal/llm-typewriter.git")
+            url.set("https://github.com/ECSDevs/llm-typewriter")
+            connection.set("scm:git:git://github.com/ECSDevs/llm-typewriter.git")
+            developerConnection.set("scm:git:ssh://git@github.com/ECSDevs/llm-typewriter.git")
         }
     }
 }

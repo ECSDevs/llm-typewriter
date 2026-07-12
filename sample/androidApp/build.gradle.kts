@@ -12,11 +12,11 @@ kotlin {
 }
 
 android {
-    namespace = "io.github.nadeemiqbal.llmtypewriter.sample.android"
+    namespace = "cc.ptoe.llmtypewriter.sample.android"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "io.github.nadeemiqbal.llmtypewriter.sample"
+        applicationId = "cc.ptoe.llmtypewriter.sample"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1

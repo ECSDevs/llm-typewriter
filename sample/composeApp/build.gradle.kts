@@ -33,7 +33,7 @@ kotlin {
 }
 
 android {
-    namespace = "io.github.nadeemiqbal.llmtypewriter.sample"
+    namespace = "cc.ptoe.llmtypewriter.sample"
     compileSdk = libs.versions.compileSdk.get().toInt()
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInt()
