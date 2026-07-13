@@ -178,4 +178,25 @@ class StreamingTypewriterUiTest {
         }
         onNodeWithText("demo alt", substring = false, useUnmergedTree = true).assertIsDisplayed()
     }
+
+    @Test
+    fun markdownCodeBlock_rendersHighlightedContent() = runComposeUiTest {
+        val state = StreamingTypewriterState()
+        setContent {
+            MaterialTheme {
+                StreamingTypewriter(
+                    tokens = remember { MutableSharedFlow() },
+                    state = state,
+                    renderer = rememberMarkdownTypewriterRenderer(state),
+                    baseDelayMs = 0L,
+                )
+            }
+        }
+        state.appendToken("```kotlin\nval answer = 42\n```")
+        state.skipToEnd()
+        waitUntil(timeoutMillis = 5_000) {
+            state.revealed == "```kotlin\nval answer = 42\n```"
+        }
+        onNodeWithText("val answer = 42", substring = false, useUnmergedTree = true).assertIsDisplayed()
+    }
 }

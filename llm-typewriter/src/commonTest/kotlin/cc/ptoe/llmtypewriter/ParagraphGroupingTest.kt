@@ -159,6 +159,39 @@ class ParagraphGroupingTest {
         )
     }
 
+    // --- Block quotes ---
+
+    @Test
+    fun consecutiveBlockQuotes_groupTogether() {
+        val a = MdToken.BlockQuote(level = 1, inline = listOf(MdToken.Plain("a")))
+        val b = MdToken.BlockQuote(level = 1, inline = listOf(MdToken.Plain("b")))
+        assertEquals(
+            listOf(listOf(a, b)),
+            groupIntoParagraphs(listOf(a, b)),
+        )
+    }
+
+    @Test
+    fun blankLineBetweenBlockQuotes_splitsGroups() {
+        val a = MdToken.BlockQuote(level = 1, inline = listOf(MdToken.Plain("a")))
+        val b = MdToken.BlockQuote(level = 1, inline = listOf(MdToken.Plain("b")))
+        val tokens = listOf(a, MdToken.Newline, MdToken.Newline, b)
+        assertEquals(
+            listOf(listOf(a), listOf(b)),
+            groupIntoParagraphs(tokens),
+        )
+    }
+
+    @Test
+    fun textAfterBlockQuote_singleNewlineFlushesQuote() {
+        val quote = MdToken.BlockQuote(level = 1, inline = listOf(MdToken.Plain("quoted")))
+        val tokens = listOf(quote, MdToken.Newline, MdToken.Plain("after"))
+        assertEquals(
+            listOf(listOf(quote), listOf(MdToken.Plain("after"))),
+            groupIntoParagraphs(tokens),
+        )
+    }
+
     // --- Lists ---
 
     @Test

@@ -7,7 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Fixed long inline code spans overflowing the grid when rendered inside Markdown table cells.
+
+- Fixed nested bold-italic Markdown spans such as `**_bold italic_**` rendering with both styles.
+
+- **Sample app streams.** Reorganized the demo into one mixed showcase and focused streams for
+  plain text, Markdown, code blocks, images, math, lists, tables, and footnotes.
+
+- **Markdown split lines.** The streaming Markdown parser and renderer now support `---` as a
+  full-width horizontal divider.
+
 ### Added
+- **Markdown footnotes.** The streaming parser now supports `[^label]` references and
+  `[^label]: definition` lines. References render as superscripts and definitions render in a
+  compact, styled section as the stream grows. The sample app includes a dedicated Footnotes
+  stream demonstrating both forms.
+
+- **Embedded Cascadia Code for markdown code.** Android inline code spans and fenced code blocks
+  now load a bundled Cascadia Code font family from `src/androidMain/res/font/`, so markdown code
+  renders with the intended typeface instead of the platform-generic monospace fallback.
+
+- **Markdown code block language labels.** Fenced code blocks with a language now show that
+  language in a compact label at the top-right of the code surface.
+
+- **Markdown block quotes.** The streaming Markdown parser now recognises line-start `>`
+  markers as `MdToken.BlockQuote`, including nested `>>` quote levels. Consecutive quote lines
+  are grouped into styled quote blocks by the renderer, and inline formatting inside a quote
+  line still works. `MarkdownStyles` now exposes `blockQuoteStripe` and `blockQuoteBackground`
+  for theme overrides.
+
 - **Markdown images.** `![alt text](url)` is parsed as `MdToken.Image` and rendered through the
   configurable `MarkdownStyles.imageRenderer` composable hook. The default uses Coil to load
   remote images, while applications can plug in their own loader or cache.
@@ -32,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `---` (horizontal rule territory), and dates like `2024.01.01` do **not** trigger list parsing.
 
 ### Fixed
+- **Markdown code block trailing blank line.** Closed fenced code blocks now trim the single
+  newline that exists only to place the closing fence on its own line, so code no longer renders
+  with a redundant empty trailing line.
+
 - **Markdown image diagnostics.** The default markdown image renderer now distinguishes loading
   and error states in its fallback UI and logs Android image-load failures through `Log.e`, so
   remote-image issues can be diagnosed from a single repro.
@@ -64,6 +96,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unrelated dependencies.
 
 ### Changed
+- **Inline code styling.** Markdown inline code now renders with rounded corners and compact
+  horizontal and vertical padding while retaining its configured background and Cascadia Code
+  font.
+
 - **Sample app image demo.** Replaced the Wikimedia markdown image URL in the sample stream with
   `https://picsum.photos/200` after Wikimedia responded with HTTP 403 to the app's image request.
 
@@ -75,8 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Android-only target, streaming LaTeX math, incremental parsing, performance
   work); all code — original and modified — remains Apache 2.0.
 - **Sample app:** the single "New stream" button (which auto-cycled the demo
-  responses) has been replaced with a row of named stream chips — "Markdown &
-  code", "Python", "Plain text", "Math", "Lists", "Tables". Tapping a chip
+  responses) has been replaced with a row of named stream chips. Tapping a chip
   plays that stream directly, and the currently-loaded stream is highlighted.
   The playback controls (Stop / Resume / Speed) moved into a separate row.
 

@@ -56,11 +56,12 @@ from the tag (`v0.2.0` → `0.2.0`); override locally with `-Pversion=...`.
 | `StreamingTypewriterState.kt` | Phase machine + reveal buffer + headless state container. |
 | `SpeedCurve.kt` | `Linear` / `EaseOut` / `Natural` reveal cadences. |
 | `TypewriterRenderer.kt` | `TypewriterRenderer` interface + `Plain` + `Markdown` renderers, including image hook wiring. |
-| `MarkdownStreamParser.kt` | Prefix-stable streaming Markdown parser (images, links, and `$…$` / `$$…$$` math delimiters). |
+| `MarkdownStreamParser.kt` | Prefix-stable streaming Markdown parser (split lines, images, links, footnotes, and `$…$` / `$$…$$` math delimiters). |
 | `TexParser.kt` | Prefix-stable lexer for TeX math fragments (`\command`, `{group}`, `^`/`_` scripts, `%comment`). Retained for prefix-stability testing and future programmatic AST use — rendering is now delegated to AndroidMath (see `MathRendering.kt`). |
 | `MathAst.kt` | Semantic AST built from `TexToken`s — fractions, sqrt, sub/sup, big operators, symbols, delimiters. Retained for testing; no longer used by the renderer. |
 | `MathRendering.kt` | `expect` declaration of `RenderPlatformMath` — renders a complete LaTeX fragment via the platform's math backend. |
 | `CodeHighlighter.kt` | Kotlin / JS / TS / Python syntax highlighter. |
+| `CodeBlockFontFamily.kt` | `expect` declaration of the platform font family used by fenced markdown code blocks. |
 | `MarkdownStyles.kt` | Style record for the Markdown renderer (math color / display background / display scale). |
 | `ImageLoading.kt` | `expect` declaration for the platform-default Coil `ImageLoader` used by markdown images. |
 | `Cursor.kt` | `Block` / `Line` / `Underscore` / `None` / `Custom` cursors. |
@@ -74,6 +75,7 @@ from the tag (`v0.2.0` → `0.2.0`); override locally with `-Pversion=...`.
 |---|---|
 | `MathRendering.android.kt` | `actual` implementation — delegates to [AndroidMath](https://github.com/gregcockroft/AndroidMath)'s `MTMathView` via `AndroidView`. Renders LaTeX with native Freetype + Latin Modern Math / Tex Gyre Termes / XITS Math fonts. |
 | `ImageLoading.android.kt` | `actual` implementation — builds the default Coil `ImageLoader` with an explicit OkHttp network fetcher for markdown images. |
+| `CodeBlockFontFamily.android.kt` | `actual` implementation — loads the embedded Cascadia Code Android font resources for fenced markdown code blocks. |
 
 Tests:
 - `src/commonTest/` — pure-logic tests (parser, highlighter, state, speed curves, TeX parser, math AST). No Compose runtime.
@@ -102,6 +104,9 @@ Tests:
 - **Image loading stays replaceable.** Markdown image URLs are parsed in common code and the
   default `MarkdownStyles.imageRenderer` uses Coil; applications may replace it with their own
   loader or cache.
+- **Code block font is embedded on Android.** Fenced markdown code blocks use the library-bundled
+  Cascadia Code font family from `src/androidMain/res/font/`; keep those resources in sync with
+  `CodeBlockFontFamily.android.kt`.
 
 ## Conventions
 

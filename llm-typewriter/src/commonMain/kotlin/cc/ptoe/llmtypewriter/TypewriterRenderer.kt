@@ -4,10 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,6 +41,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -99,18 +102,21 @@ fun MarkdownTypewriterRenderer(
  * [ListBlock]s — can be unit-tested without the Compose runtime.
  */
 internal sealed class MdBlock {
-    data class Inline(val annotated: AnnotatedString) : MdBlock()
+    data class Inline(val tokens: List<MdToken>) : MdBlock()
     data class InlineWithImages(val tokens: List<MdToken>) : MdBlock()
     /** Inline run that contains math segments interleaved with text — laid out on a single
      *  wrapped line via [FlowRow] so math sits inline with surrounding words (not on its own row). */
     data class InlineRunWithMath(val segments: List<InlineSegment>) : MdBlock()
+    data class BlockQuote(val lines: List<MdToken.BlockQuote>) : MdBlock()
     data class Heading(val level: Int, val text: String) : MdBlock()
+    data object HorizontalRule : MdBlock()
     data class Image(val altText: String, val url: String) : MdBlock()
     data class Code(val token: MdToken.CodeBlock) : MdBlock()
     /** Display math `$$...$$` — block-level, centered, with background. */
     data class DisplayMath(val content: String) : MdBlock()
     /** GFM table — header row + aligned data rows, rendered as a bordered grid. */
     data class Table(val token: MdToken.Table) : MdBlock()
+    data class Footnote(val token: MdToken.FootnoteDefinition) : MdBlock()
     /**
      * A list (ordered or unordered). Built from a run of [MdToken.ListItem] tokens via
      * [buildListBlock]. The first item's [startNumber] becomes the list's start number for
@@ -141,7 +147,7 @@ internal data class ListItemNode(
  *  `internal` (not `private`) because [MdBlock] is internal and this type leaks through
  *  [MdBlock.InlineRunWithMath.segments]. */
 internal sealed class InlineSegment {
-    data class Text(val annotated: AnnotatedString) : InlineSegment()
+    data class Text(val tokens: List<MdToken>) : InlineSegment()
     data class Math(val content: String) : InlineSegment()
 }
 
@@ -159,13 +165,22 @@ private fun planBlocks(tokens: List<MdToken>, styles: MarkdownStyles): List<MdBl
                 continue
             }
         }
+        if (firstTok is MdToken.BlockQuote) {
+            val quoteLines = group.filterIsInstance<MdToken.BlockQuote>()
+            if (quoteLines.isNotEmpty()) {
+                blocks += MdBlock.BlockQuote(quoteLines)
+                continue
+            }
+        }
         if (group.size == 1) {
             when (val tok = group[0]) {
                 is MdToken.CodeBlock -> { blocks += MdBlock.Code(tok); continue }
                 is MdToken.Heading -> { blocks += MdBlock.Heading(tok.level, tok.text); continue }
+                MdToken.HorizontalRule -> { blocks += MdBlock.HorizontalRule; continue }
                 is MdToken.Image -> { blocks += MdBlock.Image(tok.altText, tok.url); continue }
                 is MdToken.DisplayMath -> { blocks += MdBlock.DisplayMath(tok.content); continue }
                 is MdToken.Table -> { blocks += MdBlock.Table(tok); continue }
+                is MdToken.FootnoteDefinition -> { blocks += MdBlock.Footnote(tok); continue }
                 else -> Unit
             }
         }
@@ -176,7 +191,7 @@ private fun planBlocks(tokens: List<MdToken>, styles: MarkdownStyles): List<MdBl
         } else if (hasMath) {
             blocks += MdBlock.InlineRunWithMath(buildInlineSegments(group, styles))
         } else {
-            blocks += MdBlock.Inline(buildAnnotatedFromInline(group, styles))
+            blocks += MdBlock.Inline(group)
         }
     }
     return blocks
@@ -265,8 +280,8 @@ private fun MutableListItem.freeze(): ListItemNode = ListItemNode(
  *    separator). Any number of newlines ≥ 2 collapses to a single paragraph break.
  *  - A **single** [MdToken.Newline] is a soft break — rendered as a space so wrapped text joins
  *    across the line instead of breaking.
- *  - Block-level tokens ([MdToken.Heading], [MdToken.CodeBlock], [MdToken.DisplayMath],
- *    [MdToken.Image], [MdToken.ListItem]) always start their own group and act as implicit
+ *  - Block-level tokens ([MdToken.Heading], [MdToken.HorizontalRule], [MdToken.CodeBlock], [MdToken.DisplayMath],
+ *    [MdToken.Image], [MdToken.ListItem], [MdToken.BlockQuote]) always start their own group and act as implicit
  *    paragraph breaks.
  *
  * [MdToken.ListItem] is special-cased: consecutive items with no intervening blank line go into
@@ -274,6 +289,9 @@ private fun MutableListItem.freeze(): ListItemNode = ListItemNode(
  * between two list items is dropped (no space inserted) — list items are visual blocks, not
  * soft-wrapped text. A non-ListItem token following a list group flushes it (so a paragraph
  * immediately after a list isn't glued onto the last item).
+ *
+ * [MdToken.BlockQuote] is grouped the same way: consecutive quote lines form one quote block, a
+ * newline between quote lines is dropped, and non-quote content flushes the quote group.
  *
  * A single newline at a block boundary (when the current group is empty) is dropped so it doesn't
  * introduce a leading space in the next paragraph.
@@ -300,8 +318,13 @@ internal fun groupIntoParagraphs(tokens: List<MdToken>): List<List<MdToken>> {
                 if (!currentIsList) flush()
                 current += tok
             }
-            is MdToken.Heading, is MdToken.CodeBlock, is MdToken.DisplayMath, is MdToken.Image,
-            is MdToken.Table -> {
+            is MdToken.BlockQuote -> {
+                val currentIsQuote = current.firstOrNull() is MdToken.BlockQuote
+                if (!currentIsQuote) flush()
+                current += tok
+            }
+            is MdToken.Heading, is MdToken.HorizontalRule, is MdToken.CodeBlock, is MdToken.DisplayMath, is MdToken.Image,
+            is MdToken.Table, is MdToken.FootnoteDefinition -> {
                 flush()
                 groups += mutableListOf(tok)
             }
@@ -312,22 +335,27 @@ internal fun groupIntoParagraphs(tokens: List<MdToken>): List<List<MdToken>> {
                 val next = tokens.getOrNull(i + run)
                 val nextIsBlock =
                     next is MdToken.Heading || next is MdToken.CodeBlock ||
-                        next is MdToken.DisplayMath || next is MdToken.Image || next is MdToken.Table
+                    next is MdToken.HorizontalRule || next is MdToken.DisplayMath || next is MdToken.Image || next is MdToken.Table ||
+                        next is MdToken.FootnoteDefinition
                 val currentIsList = current.firstOrNull() is MdToken.ListItem
+                val currentIsQuote = current.firstOrNull() is MdToken.BlockQuote
                 val nextIsListItem = next is MdToken.ListItem
+                val nextIsQuote = next is MdToken.BlockQuote
                 when {
                     // Blank line (2+ newlines) → paragraph break.
                     run >= 2 -> flush()
                     // Single newline immediately before a block-level token, or before a list
                     // item when we're NOT already inside a list group → paragraph break. Don't
                     // seed a trailing space; the block / list token flushes its own group.
-                    nextIsBlock || (nextIsListItem && !currentIsList) -> flush()
+                    nextIsBlock || (nextIsListItem && !currentIsList) || (nextIsQuote && !currentIsQuote) -> flush()
                     // Inside a list and the next non-newline token is another list item → drop
                     // the newline entirely. List items are visual blocks, not soft-wrapped text.
                     currentIsList && nextIsListItem -> { /* drop newline */ }
+                    currentIsQuote && nextIsQuote -> { /* drop newline */ }
                     // List group ended (next is inline text, not a list item) → flush so the
                     // trailing paragraph isn't glued onto the last item as a soft-break space.
                     currentIsList && next != null -> flush()
+                    currentIsQuote && next != null -> flush()
                     // Single newline between two inline runs → CommonMark soft break (space).
                     current.isNotEmpty() && next != null -> current += MdToken.Plain(" ")
                     // else: single newline at block boundary or end of input → drop.
@@ -338,7 +366,7 @@ internal fun groupIntoParagraphs(tokens: List<MdToken>): List<List<MdToken>> {
             else -> {
                 // Non-list inline token (Plain, Bold, …) — if we were in a list group, flush it
                 // so the new paragraph starts fresh.
-                if (current.firstOrNull() is MdToken.ListItem) flush()
+                if (current.firstOrNull() is MdToken.ListItem || current.firstOrNull() is MdToken.BlockQuote) flush()
                 current += tok
             }
         }
@@ -359,9 +387,8 @@ private fun buildInlineSegments(tokens: List<MdToken>, styles: MarkdownStyles): 
 
     fun flushText() {
         if (textBuffer.isEmpty()) return
-        val annotated = buildAnnotatedFromInline(textBuffer, styles)
-        if (annotated.length > 0) {
-            segments += InlineSegment.Text(annotated)
+        if (textBuffer.any { it !is MdToken.Plain || it.text.isNotEmpty() }) {
+            segments += InlineSegment.Text(textBuffer.toList())
         }
         textBuffer.clear()
     }
@@ -400,10 +427,11 @@ private fun RenderMarkdownStream(
         for (block in blocks) {
             when (block) {
                 is MdBlock.Inline -> {
-                    if (block.annotated.length > 0) Text(text = block.annotated)
+                    RenderInlineText(block.tokens, styles)
                 }
                 is MdBlock.InlineWithImages -> RenderInlineWithImages(block.tokens, styles)
                 is MdBlock.InlineRunWithMath -> RenderInlineRunWithMath(block.segments, styles)
+                is MdBlock.BlockQuote -> RenderBlockQuote(block.lines, styles)
                 is MdBlock.Heading -> {
                     val base = LocalTextStyle.current
                     val baseSize = base.fontSize.let { fs ->
@@ -415,10 +443,19 @@ private fun RenderMarkdownStream(
                     )
                     Text(text = block.text, style = style)
                 }
+                MdBlock.HorizontalRule -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(LocalContentColor.current.copy(alpha = 0.24f)),
+                    )
+                }
                 is MdBlock.Image -> styles.imageRenderer.Render(block.url, block.altText)
                 is MdBlock.Code -> RenderCodeBlock(block.token, styles)
                 is MdBlock.DisplayMath -> RenderDisplayMath(block.content, styles)
                 is MdBlock.Table -> RenderTable(block.token, styles)
+                is MdBlock.Footnote -> RenderFootnote(block.token, styles)
                 is MdBlock.ListBlock -> RenderList(block, styles, depth = 0)
             }
         }
@@ -477,7 +514,7 @@ private fun RenderInlineRunWithMath(segments: List<InlineSegment>, styles: Markd
         var widthIndex = 0
         for (segment in segments) {
             when (segment) {
-                is InlineSegment.Text -> append(segment.annotated)
+                is InlineSegment.Text -> append(buildAnnotatedFromInline(segment.tokens, styles))
                 is InlineSegment.Math -> {
                     val id = "math_${mathIndex++}"
                     appendInlineContent(id, segment.content)
@@ -596,13 +633,15 @@ private fun RenderTable(token: MdToken.Table, styles: MarkdownStyles) {
     val columnCount = token.headers.size
     val tableShape = RoundedCornerShape(12.dp)
 
-    Column(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .background(tableBackground, tableShape)
             .clip(tableShape)
             .border(1.dp, borderColor, tableShape),
     ) {
+        val cellWidth = if (columnCount == 0) 0.dp else maxWidth / columnCount
+        Column {
         // Header row. height(IntrinsicSize.Min) + fillMaxHeight() on each cell ensures all cells
         // in a row stretch to the tallest cell's height (so borders align when one cell wraps).
         Row(
@@ -622,6 +661,7 @@ private fun RenderTable(token: MdToken.Table, styles: MarkdownStyles) {
                     isLastColumn = index == columnCount - 1,
                     style = baseStyle.copy(fontWeight = FontWeight.Medium),
                     styles = styles,
+                    maxInlineCodeWidth = cellWidth - 32.dp,
                 )
             }
         }
@@ -644,9 +684,11 @@ private fun RenderTable(token: MdToken.Table, styles: MarkdownStyles) {
                         isLastColumn = i == columnCount - 1,
                         style = baseStyle,
                         styles = styles,
+                        maxInlineCodeWidth = cellWidth - 32.dp,
                     )
                 }
             }
+        }
         }
     }
 }
@@ -667,17 +709,18 @@ private fun RowScope.TableCell(
     isLastColumn: Boolean,
     style: TextStyle,
     styles: MarkdownStyles,
+    maxInlineCodeWidth: androidx.compose.ui.unit.Dp,
 ) {
     val textAlign = when (align) {
         TableAlign.LEFT, TableAlign.DEFAULT -> TextAlign.Start
         TableAlign.CENTER -> TextAlign.Center
         TableAlign.RIGHT -> TextAlign.End
     }
-    val annotated = remember(text, styles) {
-        buildAnnotatedFromInline(parseStreamingMarkdown(text), styles)
-    }
-    Text(
-        text = annotated,
+    val inlineTokens = remember(text) { parseStreamingMarkdown(text) }
+    RenderInlineText(
+        tokens = inlineTokens,
+        styles = styles,
+        maxInlineCodeWidth = maxInlineCodeWidth,
         modifier = Modifier
             .weight(1f)
             .fillMaxHeight()
@@ -773,8 +816,7 @@ private fun RenderItemInline(tokens: List<MdToken>, styles: MarkdownStyles) {
     if (hasMath) {
         RenderInlineRunWithMath(buildInlineSegments(tokens, styles), styles)
     } else {
-        val annotated = buildAnnotatedFromInline(tokens, styles)
-        if (annotated.length > 0) Text(text = annotated)
+        RenderInlineText(tokens, styles)
     }
 }
 
@@ -784,8 +826,7 @@ private fun RenderInlineWithImages(tokens: List<MdToken>, styles: MarkdownStyles
     @Composable
     fun flushText() {
         if (textTokens.isEmpty()) return
-        val annotated = buildAnnotatedFromInline(textTokens, styles)
-        if (annotated.isNotEmpty()) Text(text = annotated)
+        RenderInlineText(textTokens, styles)
         textTokens.clear()
     }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -798,6 +839,157 @@ private fun RenderInlineWithImages(tokens: List<MdToken>, styles: MarkdownStyles
             }
         }
         flushText()
+    }
+}
+
+/** Renders inline markdown while giving each code span its own rounded, padded surface. */
+private fun wrapInlineCodeText(
+    text: String,
+    style: TextStyle,
+    maxWidth: androidx.compose.ui.unit.Dp,
+    textMeasurer: androidx.compose.ui.text.TextMeasurer,
+    density: androidx.compose.ui.unit.Density,
+): String {
+    val maxWidthPx = with(density) { maxWidth.toPx() }
+    if (text.isEmpty() || maxWidthPx <= 0f) return text
+
+    val result = StringBuilder(text.length)
+    val line = StringBuilder()
+    for (char in text) {
+        if (char == '\n') {
+            result.append(line).append('\n')
+            line.clear()
+            continue
+        }
+        val candidate = line.toString() + char
+        val width = textMeasurer.measure(AnnotatedString(candidate), style).size.width
+        if (line.isNotEmpty() && width > maxWidthPx) {
+            result.append(line).append('\n')
+            line.clear()
+        }
+        line.append(char)
+    }
+    result.append(line)
+    return result.toString()
+}
+
+@Composable
+private fun RenderInlineText(
+    tokens: List<MdToken>,
+    styles: MarkdownStyles,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalTextStyle.current,
+    maxInlineCodeWidth: androidx.compose.ui.unit.Dp? = null,
+) {
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val codePaddingHorizontal = 4.dp
+    val codePaddingVertical = 1.dp
+    val codeBackground = styles.code.background.takeIf { it != Color.Unspecified }
+        ?: LocalContentColor.current.copy(alpha = 0.12f)
+    val inlineContent = mutableMapOf<String, InlineTextContent>()
+    val annotated = buildAnnotatedString {
+        var codeIndex = 0
+        for (token in tokens) {
+            if (token is MdToken.InlineCode) {
+                val codeTextStyle = style.copy(
+                    color = styles.code.color.takeIf { it != Color.Unspecified } ?: style.color,
+                    fontFamily = styles.code.fontFamily ?: style.fontFamily,
+                    fontWeight = styles.code.fontWeight ?: style.fontWeight,
+                    fontStyle = styles.code.fontStyle ?: style.fontStyle,
+                    fontSize = styles.code.fontSize.takeUnless { it == TextUnit.Unspecified } ?: style.fontSize,
+                )
+                val fontSize = codeTextStyle.fontSize.takeUnless { it == TextUnit.Unspecified } ?: 16.sp
+                val lineHeight = style.lineHeight.takeUnless { it == TextUnit.Unspecified } ?: fontSize * 1.2f
+                val codeChunks = maxInlineCodeWidth?.let {
+                    wrapInlineCodeText(
+                        token.text,
+                        codeTextStyle,
+                        (it - codePaddingHorizontal * 2).coerceAtLeast(0.dp),
+                        textMeasurer,
+                        density,
+                    ).split('\n')
+                } ?: listOf(token.text)
+                codeChunks.forEachIndexed { chunkIndex, displayText ->
+                    if (chunkIndex > 0) append('\n')
+                    val id = "inline_code_${codeIndex++}"
+                    appendInlineContent(id, displayText)
+                    val measuredWidth = textMeasurer.measure(
+                        text = AnnotatedString(displayText),
+                        style = codeTextStyle,
+                    ).size.width
+                    val width = with(density) {
+                        (measuredWidth.toDp() + codePaddingHorizontal * 2).toSp()
+                    }
+                    val height = with(density) {
+                        (lineHeight.toDp() + codePaddingVertical * 2).toSp()
+                    }
+                    inlineContent[id] = InlineTextContent(
+                        placeholder = Placeholder(
+                            width = width,
+                            height = height,
+                            placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
+                        ),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(codeBackground)
+                                .padding(horizontal = codePaddingHorizontal, vertical = codePaddingVertical),
+                        ) {
+                            Text(text = displayText, style = codeTextStyle)
+                        }
+                    }
+                }
+            } else {
+                append(buildAnnotatedFromInline(listOf(token), styles))
+            }
+        }
+    }
+    Text(text = annotated, inlineContent = inlineContent, modifier = modifier, style = style)
+}
+
+@Composable
+private fun RenderBlockQuote(lines: List<MdToken.BlockQuote>, styles: MarkdownStyles) {
+    val stripeColor = styles.blockQuoteStripe.takeIf { it != Color.Unspecified }
+        ?: LocalContentColor.current.copy(alpha = 0.35f)
+    val backgroundColor = styles.blockQuoteBackground.takeIf { it != Color.Unspecified }
+        ?: Color.Transparent
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for (line in lines) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min)
+                    .padding(start = 12.dp * (line.level - 1)),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .background(stripeColor, RoundedCornerShape(999.dp))
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 10.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(backgroundColor)
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                ) {
+                    if (line.inline.isEmpty()) {
+                        Spacer(modifier = Modifier.height(20.dp))
+                    } else {
+                        RenderItemInline(line.inline, styles)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -817,34 +1009,56 @@ private fun headingScale(level: Int): Float = when (level) {
 
 internal fun buildAnnotatedFromInline(tokens: List<MdToken>, styles: MarkdownStyles): AnnotatedString {
     return buildAnnotatedString {
+        appendInlineTokens(this, tokens, styles)
+    }
+}
+
+/**
+ * Appends inline tokens while preserving nested Markdown styles. The parser keeps the payload of
+ * emphasis tokens as text so the streaming token shape stays prefix-stable; parse that payload at
+ * render time to support forms such as `**_bold italic_**`.
+ */
+private fun appendInlineTokens(
+    builder: androidx.compose.ui.text.AnnotatedString.Builder,
+    tokens: List<MdToken>,
+    styles: MarkdownStyles,
+) {
+    with(builder) {
         for (tok in tokens) {
             when (tok) {
                 is MdToken.Plain -> append(tok.text)
-                is MdToken.Bold -> withStyle(styles.bold) { append(tok.text) }
-                is MdToken.Italic -> withStyle(styles.italic) { append(tok.text) }
+                is MdToken.Bold -> withStyle(styles.bold) {
+                    appendInlineTokens(this, parseStreamingMarkdown(tok.text), styles)
+                }
+                is MdToken.Italic -> withStyle(styles.italic) {
+                    appendInlineTokens(this, parseStreamingMarkdown(tok.text), styles)
+                }
                 is MdToken.BoldItalic -> withStyle(styles.bold) {
-                    withStyle(styles.italic) { append(tok.text) }
+                    withStyle(styles.italic) {
+                        appendInlineTokens(this, parseStreamingMarkdown(tok.text), styles)
+                    }
                 }
                 is MdToken.InlineCode -> withStyle(styles.code) { append(tok.text) }
-                is MdToken.Strikethrough -> withStyle(styles.strikethrough) { append(tok.text) }
+                is MdToken.Strikethrough -> withStyle(styles.strikethrough) {
+                    appendInlineTokens(this, parseStreamingMarkdown(tok.text), styles)
+                }
                 is MdToken.Link -> withLink(
                     LinkAnnotation.Url(
                         url = tok.url,
                         styles = TextLinkStyles(style = styles.link),
                     ),
                 ) { append(tok.label) }
+                is MdToken.FootnoteReference -> withStyle(
+                    styles.footnoteReference.copy(
+                        baselineShift = androidx.compose.ui.text.style.BaselineShift.Superscript,
+                    ),
+                ) { append("[${tok.label}]") }
                 is MdToken.Image -> append(tok.altText)
                 is MdToken.Heading -> withStyle(styles.heading) { append(tok.text) }
-                is MdToken.CodeBlock, MdToken.Newline -> { /* block-level — handled by the caller */ }
-                // List items are block-level — routed to [buildListBlock] by [planBlocks]. Should
-                // never reach this inline-assembly path; emit nothing so they're not rendered as
-                // raw `toString()` text.
-                is MdToken.ListItem -> { /* block-level — handled by [RenderList] */ }
-                // Tables are block-level — routed to [RenderTable] by [planBlocks].
-                is MdToken.Table -> { /* block-level — handled by [RenderTable] */ }
-                // Math tokens are rendered as dedicated blocks by [planBlocks]. They should never
-                // reach this inline-assembly path; if they do, emit raw content so no characters
-                // are silently dropped.
+                is MdToken.CodeBlock, MdToken.Newline, MdToken.HorizontalRule -> { /* block-level */ }
+                is MdToken.ListItem, is MdToken.BlockQuote, is MdToken.Table, is MdToken.FootnoteDefinition -> {
+                    /* block-level */
+                }
                 is MdToken.InlineMath -> append(tok.content)
                 is MdToken.DisplayMath -> append(tok.content)
             }
@@ -853,11 +1067,32 @@ internal fun buildAnnotatedFromInline(tokens: List<MdToken>, styles: MarkdownSty
 }
 
 @Composable
+private fun RenderFootnote(token: MdToken.FootnoteDefinition, styles: MarkdownStyles) {
+    val definitionColor = styles.footnoteDefinition.takeIf { it != Color.Unspecified }
+        ?: LocalContentColor.current.copy(alpha = 0.72f)
+    Text(
+        text = buildAnnotatedString {
+            withStyle(styles.footnoteReference.copy(
+                baselineShift = androidx.compose.ui.text.style.BaselineShift.Superscript,
+            )) { append("[${token.label}] ") }
+            withStyle(androidx.compose.ui.text.SpanStyle(color = definitionColor)) {
+                append(buildAnnotatedFromInline(token.inline, styles))
+            }
+        },
+        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+    )
+}
+
+@Composable
 private fun RenderCodeBlock(token: MdToken.CodeBlock, styles: MarkdownStyles) {
     val lang = remember(token.language) { CodeLanguage.parse(token.language) }
-    val annotated = remember(token.content, lang, styles) {
+    val languageLabel = codeBlockLanguageLabel(token.language)
+    val renderedContent = remember(token.content, token.closed) {
+        codeBlockContentForDisplay(token.content, token.closed)
+    }
+    val annotated = remember(renderedContent, lang, styles) {
         highlightedAnnotated(
-            source = token.content,
+            source = renderedContent,
             language = lang,
             keywordColor = styles.codeBlockKeyword,
             stringColor = styles.codeBlockString,
@@ -866,13 +1101,49 @@ private fun RenderCodeBlock(token: MdToken.CodeBlock, styles: MarkdownStyles) {
             textColor = styles.codeBlockText,
         )
     }
-    Text(
-        text = annotated,
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(styles.codeBlockBackground)
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        style = LocalTextStyle.current.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-    )
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            if (languageLabel != null) {
+                Text(
+                    text = languageLabel,
+                    modifier = Modifier.fillMaxWidth(),
+                    color = styles.codeBlockText.copy(alpha = 0.65f),
+                    textAlign = TextAlign.End,
+                    style = LocalTextStyle.current.copy(
+                        fontFamily = PlatformCodeBlockFontFamily,
+                        fontSize = 11.sp,
+                    ),
+                )
+            }
+            Text(
+                text = annotated,
+                style = LocalTextStyle.current.copy(fontFamily = PlatformCodeBlockFontFamily),
+            )
+        }
+    }
+}
+
+/** Returns the optional fenced-code info string as a display label. */
+internal fun codeBlockLanguageLabel(language: String?): String? =
+    language?.trim()?.takeIf { it.isNotEmpty() }
+
+/**
+ * Closed fenced blocks carry the newline that precedes the closing fence because it's required by
+ * markdown syntax (`code\n````). Rendering that trailing newline directly makes `Text` paint an
+ * extra empty visual line that is not perceived as code content. Trim exactly one terminal line
+ * break for closed blocks, while preserving intentional blank lines (`...\n\n``` ` stays `...\n`).
+ */
+internal fun codeBlockContentForDisplay(content: String, closed: Boolean): String {
+    if (!closed) return content
+    return when {
+        content.endsWith("\r\n") -> content.dropLast(2)
+        content.endsWith("\n") -> content.dropLast(1)
+        else -> content
+    }
 }

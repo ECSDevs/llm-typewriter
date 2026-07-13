@@ -64,6 +64,14 @@ data class MarkdownStyles(
     val tableHeaderBackground: Color = Color.Unspecified,
     /** Background color for the rounded GFM table surface. */
     val tableBackground: Color = Color.Unspecified,
+    /** Stripe color for markdown block quotes (`> quote`). */
+    val blockQuoteStripe: Color = Color.Unspecified,
+    /** Background tint for markdown block quotes (`> quote`). */
+    val blockQuoteBackground: Color = Color.Unspecified,
+    /** Style for superscript footnote references such as `[^1]`. */
+    val footnoteReference: SpanStyle = SpanStyle(),
+    /** Color for compact footnote definitions rendered below the main content. */
+    val footnoteDefinition: Color = Color.Unspecified,
     /** Image loader/renderer. The default uses Coil; applications can replace it if needed. */
     val imageRenderer: MarkdownImageRenderer = MarkdownImageRenderer { url, altText ->
         val shape = RoundedCornerShape(8.dp)

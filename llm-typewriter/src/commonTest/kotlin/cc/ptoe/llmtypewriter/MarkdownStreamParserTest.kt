@@ -57,6 +57,14 @@ class MarkdownStreamParserTest {
     }
 
     @Test
+    fun boldContainingItalic_preservesNestedMarkdownPayload() {
+        assertEquals(
+            listOf(MdToken.Bold("_bold italic_")),
+            parseStreamingMarkdown("**_bold italic_**"),
+        )
+    }
+
+    @Test
     fun inlineCode_backticks() {
         val tokens = parseStreamingMarkdown("call `foo()` here")
         assertEquals(
@@ -345,6 +353,72 @@ class MarkdownStreamParserTest {
         assertEquals(listOf(MdToken.InlineMath("x^2", closed = true)), parseStreamingMarkdown(full))
     }
 
+    // --- Block quotes ---
+
+    @Test
+    fun blockQuote_simple() {
+        val tokens = parseStreamingMarkdown("> quoted text")
+        assertEquals(
+            listOf(MdToken.BlockQuote(level = 1, inline = listOf(MdToken.Plain("quoted text")))),
+            tokens,
+        )
+    }
+
+    @Test
+    fun blockQuote_nestedLevel() {
+        val tokens = parseStreamingMarkdown(">> nested")
+        assertEquals(
+            listOf(MdToken.BlockQuote(level = 2, inline = listOf(MdToken.Plain("nested")))),
+            tokens,
+        )
+    }
+
+    @Test
+    fun blockQuote_inlineFormattingParsed() {
+        val tokens = parseStreamingMarkdown("> **bold** and `code`")
+        val quote = tokens.single() as MdToken.BlockQuote
+        assertEquals(
+            listOf(MdToken.Bold("bold"), MdToken.Plain(" and "), MdToken.InlineCode("code")),
+            quote.inline,
+        )
+    }
+
+    @Test
+    fun blockQuote_followedByParagraph() {
+        val tokens = parseStreamingMarkdown("> quoted\n\nAfter quote.")
+        assertEquals(
+            listOf(
+                MdToken.BlockQuote(level = 1, inline = listOf(MdToken.Plain("quoted"))),
+                MdToken.Newline,
+                MdToken.Plain("After quote."),
+            ),
+            tokens,
+        )
+    }
+
+    @Test
+    fun blockQuote_midLineMarker_isPlain() {
+        val tokens = parseStreamingMarkdown("text > more")
+        assertEquals(listOf(MdToken.Plain("text > more")), tokens)
+    }
+
+    @Test
+    fun prefixStability_growingBlockQuote() {
+        val full = "> hello **world**"
+        listOf(3, 7, 10, 16).forEach { len ->
+            val toks = parseStreamingMarkdown(full.substring(0, len))
+            assertTrue(toks.first() is MdToken.BlockQuote, "len=$len: expected leading BlockQuote, got ${toks.firstOrNull()}")
+            val quote = toks.first() as MdToken.BlockQuote
+            val firstInline = quote.inline.firstOrNull()
+            assertTrue(firstInline is MdToken.Plain, "len=$len: expected leading Plain inline, got $firstInline")
+        }
+        val finalQuote = parseStreamingMarkdown(full).single() as MdToken.BlockQuote
+        assertEquals(
+            listOf(MdToken.Plain("hello "), MdToken.Bold("world")),
+            finalQuote.inline,
+        )
+    }
+
     // --- Lists ---
 
     @Test
@@ -499,10 +573,22 @@ class MarkdownStreamParserTest {
 
     @Test
     fun listItem_threeDashes_notAList() {
-        // `---` is a horizontal rule in CommonMark, not a list. Our parser doesn't support HR, so
-        // it should fall through to plain text (not be misparsed as a list with content `-`).
-        val tokens = parseStreamingMarkdown("---")
-        assertTrue(tokens.none { it is MdToken.ListItem })
+        assertEquals(listOf(MdToken.HorizontalRule), parseStreamingMarkdown("---"))
+    }
+
+    @Test
+    fun horizontalRule_lineBoundariesAndWhitespace() {
+        assertEquals(
+            listOf(MdToken.HorizontalRule, MdToken.Newline, MdToken.Plain("after")),
+            parseStreamingMarkdown("---\nafter"),
+        )
+        assertEquals(listOf(MdToken.HorizontalRule), parseStreamingMarkdown("  ---  "))
+        assertTrue(parseStreamingMarkdown("    ---").none { it is MdToken.HorizontalRule })
+        assertTrue(parseStreamingMarkdown("----").none { it is MdToken.HorizontalRule })
+        assertEquals(
+            listOf(MdToken.Plain("before --- after")),
+            parseStreamingMarkdown("before --- after"),
+        )
     }
 
     @Test
@@ -796,5 +882,44 @@ class MarkdownStreamParserTest {
         val table = tokens.single() as MdToken.Table
         assertEquals(listOf(TableAlign.DEFAULT, TableAlign.DEFAULT), table.aligns)
         assertEquals(listOf(listOf("1", "2")), table.rows)
+    }
+
+    @Test
+    fun footnote_reference_isInlineToken() {
+        assertEquals(
+            listOf(MdToken.Plain("Text "), MdToken.FootnoteReference("1"), MdToken.Plain(".")),
+            parseStreamingMarkdown("Text [^1]."),
+        )
+    }
+
+    @Test
+    fun footnote_definition_isBlockTokenWithInlineFormatting() {
+        assertEquals(
+            listOf(
+                MdToken.FootnoteDefinition(
+                    "1",
+                    listOf(MdToken.Bold("source")),
+                ),
+            ),
+            parseStreamingMarkdown("[^1]: **source**"),
+        )
+    }
+
+    @Test
+    fun footnote_definition_consumesItsLine() {
+        val tokens = parseStreamingMarkdown("[^a]: first\nText")
+        assertEquals(MdToken.FootnoteDefinition("a", listOf(MdToken.Plain("first"))), tokens[0])
+        assertEquals(MdToken.Plain("Text"), tokens[1])
+    }
+
+    @Test
+    fun prefixStability_growingFootnoteDefinition() {
+        val full = "[^1]: source **text**"
+        for (len in 1..full.length) {
+            val tokens = parseStreamingMarkdown(full.substring(0, len))
+            if (len >= 6) assertTrue(tokens.first() is MdToken.FootnoteDefinition, "len=$len")
+        }
+        val definition = parseStreamingMarkdown(full).single() as MdToken.FootnoteDefinition
+        assertEquals(listOf(MdToken.Plain("source "), MdToken.Bold("text")), definition.inline)
     }
 }

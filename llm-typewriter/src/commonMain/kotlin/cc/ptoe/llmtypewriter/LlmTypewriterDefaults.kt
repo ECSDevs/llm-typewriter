@@ -35,7 +35,7 @@ object LlmTypewriterDefaults {
             fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
         ),
         code = SpanStyle(
-            fontFamily = FontFamily.Monospace,
+            fontFamily = PlatformCodeBlockFontFamily,
             background = MaterialTheme.colorScheme.surfaceVariant,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         ),
@@ -59,6 +59,8 @@ object LlmTypewriterDefaults {
         tableBorder = MaterialTheme.colorScheme.outlineVariant,
         tableHeaderBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
         tableBackground = MaterialTheme.colorScheme.surfaceContainer,
+        blockQuoteStripe = MaterialTheme.colorScheme.outlineVariant,
+        blockQuoteBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
     )
 
     /** The same as [markdownStyles] but takes an explicit color scheme for testing. */
@@ -73,7 +75,7 @@ object LlmTypewriterDefaults {
         bold = SpanStyle(fontWeight = FontWeight.SemiBold),
         italic = SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
         code = SpanStyle(
-            fontFamily = FontFamily.Monospace,
+            fontFamily = PlatformCodeBlockFontFamily,
             background = surfaceVariant,
             color = onSurfaceVariant,
         ),
@@ -92,5 +94,7 @@ object LlmTypewriterDefaults {
         tableBorder = outline, // M3: outlineVariant; tests pass the primary palette only
         tableHeaderBackground = surfaceVariant, // M3: surfaceContainerHigh
         tableBackground = surfaceVariant, // M3: surfaceContainer
+        blockQuoteStripe = outline,
+        blockQuoteBackground = surfaceVariant.copy(alpha = 0.3f),
     )
 }

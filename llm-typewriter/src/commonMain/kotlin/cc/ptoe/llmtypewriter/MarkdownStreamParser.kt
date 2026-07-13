@@ -32,11 +32,20 @@ sealed class MdToken {
     /** Image: `![alt text](url)`. The renderer receives both the URL and alt text. */
     data class Image(val altText: String, val url: String) : MdToken()
 
+    /** A footnote reference: `[^label]`. */
+    data class FootnoteReference(val label: String) : MdToken()
+
+    /** A footnote definition: `[^label]: text` at the start of a line. */
+    data class FootnoteDefinition(val label: String, val inline: List<MdToken>) : MdToken()
+
     /** Heading: `# ...` / `## ...` etc. Level is 1..6, capped. */
     data class Heading(val level: Int, val text: String) : MdToken()
 
     /** Newline — emitted as its own token for layout purposes. */
     data object Newline : MdToken()
+
+    /** Horizontal split line: `---` at the start of a line. */
+    data object HorizontalRule : MdToken()
 
     /** A fenced code block. `closed` flips to `true` once the trailing ``` is seen — until then
      * the block is rendering progressively (every new char extends [content]).
@@ -86,6 +95,20 @@ sealed class MdToken {
     ) : MdToken()
 
     /**
+     * A block-quote line — `> quote` / `>> nested quote` at line start.
+     *
+     * - [level] is the number of leading `>` markers (so `>> nested` has `level = 2`).
+     * - [inline] is the inline content parsed from the rest of the line after the markers.
+     *
+     * Multi-line quotes are represented as consecutive [BlockQuote] tokens so the renderer can
+     * group them into one visual quote block while preserving prefix-stability as lines stream in.
+     */
+    data class BlockQuote(
+        val level: Int,
+        val inline: List<MdToken>,
+    ) : MdToken()
+
+    /**
      * A GFM-style table. [headers] are the raw header cell texts (inline-parsed at render time);
      * [aligns] carries per-column alignment derived from the separator row's colons
      * ([TableAlign.DEFAULT] when the separator had no colons); [rows] is the list of data rows,
@@ -125,8 +148,11 @@ enum class TableAlign { DEFAULT, LEFT, CENTER, RIGHT }
  *   - Strikethrough (`~~`)
  *   - Links (`[label](url)`)
  *   - Images (`![alt text](url)`)
+ *   - Footnotes (`[^label]` references and `[^label]: definition` lines)
+ *   - Block quotes (`> quote` / `>> nested quote`)
  *   - Unordered lists (`-` / `*` / `+` at line start, optionally indented for nesting)
  *   - Ordered lists (`1.` / `1)` at line start, optionally indented for nesting)
+ *   - Horizontal split lines (`---` at line start)
  *   - GFM tables (`| a | b |` header + `| --- | --- |` separator + data rows)
  *
  * Open spans at the tail of the input are rendered as plain text until they close — but the
@@ -159,11 +185,38 @@ internal fun parseStreamingMarkdown(input: String): List<MdToken> {
             continue
         }
 
+        if (atLineStart) {
+            val quoteEnd = consumeBlockQuoteIfAny(input, i, out)
+            if (quoteEnd > i) {
+                i = quoteEnd
+                atLineStart = true
+                continue
+            }
+        }
+
         if (atLineStart && c == '#') {
             val headingEnd = consumeHeading(input, i, out)
             if (headingEnd > i) {
                 i = headingEnd
                 atLineStart = false
+                continue
+            }
+        }
+
+        if (atLineStart) {
+            val horizontalRuleEnd = consumeHorizontalRuleIfAny(input, i, out)
+            if (horizontalRuleEnd > i) {
+                i = horizontalRuleEnd
+                atLineStart = false
+                continue
+            }
+        }
+
+        if (atLineStart) {
+            val footnoteEnd = consumeFootnoteDefinitionIfAny(input, i, out)
+            if (footnoteEnd > i) {
+                i = footnoteEnd
+                atLineStart = true
                 continue
             }
         }
@@ -311,6 +364,11 @@ internal fun parseStreamingMarkdown(input: String): List<MdToken> {
             }
         }
         if (c == '[') {
+            val footnoteEnd = consumeFootnoteReference(input, i, out)
+            if (footnoteEnd > i) {
+                i = footnoteEnd
+                continue
+            }
             val linkEnd = consumeLink(input, i, out)
             if (linkEnd > i) {
                 i = linkEnd
@@ -324,6 +382,32 @@ internal fun parseStreamingMarkdown(input: String): List<MdToken> {
         i = runEnd
     }
     return mergeAdjacentPlain(out)
+}
+
+private fun consumeFootnoteReference(input: String, start: Int, out: MutableList<MdToken>): Int {
+    if (!matchesAt(input, start, "[^")) return start
+    val close = input.indexOf(']', startIndex = start + 2)
+    if (close <= start + 2) return start
+    val label = input.substring(start + 2, close)
+    if (label.any { it.isWhitespace() }) return start
+    out += MdToken.FootnoteReference(label)
+    return close + 1
+}
+
+private fun consumeFootnoteDefinitionIfAny(
+    input: String,
+    start: Int,
+    out: MutableList<MdToken>,
+): Int {
+    if (!matchesAt(input, start, "[^")) return start
+    val close = input.indexOf(']', startIndex = start + 2)
+    if (close <= start + 2 || close + 1 >= input.length || input[close + 1] != ':') return start
+    val label = input.substring(start + 2, close)
+    if (label.any { it.isWhitespace() }) return start
+    val contentStart = if (close + 2 < input.length && input[close + 2] == ' ') close + 3 else close + 2
+    val lineEnd = input.indexOf('\n', startIndex = contentStart).let { if (it < 0) input.length else it }
+    out += MdToken.FootnoteDefinition(label, parseStreamingMarkdown(input.substring(contentStart, lineEnd)))
+    return if (lineEnd < input.length) lineEnd + 1 else input.length
 }
 
 private fun nextSpecial(s: String, from: Int): Int {
@@ -368,6 +452,21 @@ private fun consumeHeading(input: String, start: Int, out: MutableList<MdToken>)
 }
 
 /**
+ * Tries to consume a Markdown horizontal rule. Up to three leading spaces are accepted, and the
+ * line must contain exactly three dashes apart from trailing spaces. Returning the line end (and
+ * leaving its newline for the main loop) keeps the rule a block token without swallowing the
+ * following paragraph boundary.
+ */
+private fun consumeHorizontalRuleIfAny(input: String, start: Int, out: MutableList<MdToken>): Int {
+    val lineEnd = input.indexOf('\n', startIndex = start).let { if (it < 0) input.length else it }
+    val line = input.substring(start, lineEnd)
+    val leadingSpaces = line.indexOfFirst { it != ' ' }.let { if (it < 0) line.length else it }
+    if (leadingSpaces > 3 || line.substring(leadingSpaces).trimEnd() != "---") return start
+    out += MdToken.HorizontalRule
+    return lineEnd
+}
+
+/**
  * Tries to consume a list item starting at [start] (which is at a line start, possibly with
  * leading spaces). On match, emits a [MdToken.ListItem] to [out] and returns the index past the
  * trailing newline (so the next iteration is at line start again). On no match, returns [start]
@@ -405,6 +504,29 @@ private fun consumeListItemIfAny(input: String, start: Int, out: MutableList<MdT
     )
     // Consume through the trailing newline so the next iteration starts at the next line — list
     // items chain without an intervening Newline token.
+    return if (lineEnd < len) lineEnd + 1 else len
+}
+
+private fun consumeBlockQuoteIfAny(input: String, start: Int, out: MutableList<MdToken>): Int {
+    val len = input.length
+    var j = start
+    var spaces = 0
+    while (j < len && input[j] == ' ' && spaces < 3) {
+        spaces++
+        j++
+    }
+    if (j >= len || input[j] != '>') return start
+
+    var level = 0
+    while (j < len && input[j] == '>') {
+        level++
+        j++
+        if (j < len && input[j] == ' ') j++
+    }
+
+    val lineEnd = input.indexOf('\n', startIndex = j).let { if (it < 0) len else it }
+    val content = input.substring(j, lineEnd).trimEnd()
+    out += MdToken.BlockQuote(level = level, inline = parseStreamingMarkdown(content))
     return if (lineEnd < len) lineEnd + 1 else len
 }
 

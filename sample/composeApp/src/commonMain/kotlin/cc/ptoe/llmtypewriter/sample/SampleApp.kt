@@ -67,7 +67,7 @@ private data class DemoStream(val name: String, val content: String)
 
 private val DemoStreams = listOf(
     DemoStream(
-        name = "Markdown & code",
+        name = "Mixed showcase",
         content = """
             # Hello there!
 
@@ -88,13 +88,47 @@ private val DemoStreams = listOf(
             - Headings render once the line completes
             - Bold/italic flip the moment the closing delimiter arrives
             - Inline `code` works too
+            - Block quotes now render as quoted callouts:
+              > Streaming markdown stays prefix-stable while the quote grows.
+            - Split lines render as full-width dividers:
+
+            ---
+
             - Images are handed to the configurable image renderer: ![Random sample image](https://picsum.photos/200)
 
             Tap me to skip to the end.
         """.trimIndent(),
     ),
     DemoStream(
-        name = "Python",
+        name = "Markdown",
+        content = """
+            ## Inline Markdown
+
+            Markdown supports **bold**, _italic_, **_bold italic_**, ~~strikethrough~~, and
+            `inline code`. It also supports [links to the docs](https://kotlinlang.org).
+
+            Block quotes become styled callouts:
+            > Streaming Markdown stays prefix-stable while the quote grows.
+
+            Split lines render as full-width dividers:
+
+            ---
+        """.trimIndent(),
+    ),
+    DemoStream(
+        name = "Images",
+        content = """
+            ## Markdown images
+
+            Images are parsed from Markdown and handed to the configurable image renderer:
+
+            ![Random sample image](https://picsum.photos/200)
+
+            Applications can replace the default Coil-backed loader with their own renderer.
+        """.trimIndent(),
+    ),
+    DemoStream(
+        name = "Code blocks",
         content = """
             Sure — here's a quick `Python` example:
 
@@ -112,7 +146,7 @@ private val DemoStreams = listOf(
     DemoStream(
         name = "Plain text",
         content = """
-            Plain text response — no markdown, just streaming words with a `Natural` speed curve so
+            Plain text response — no markdown, just streaming words with a Natural speed curve so
             the pauses on punctuation feel like a real typist. Notice the slight hesitation here.
             And here. And here!
         """.trimIndent(),
@@ -189,6 +223,20 @@ private val DemoStreams = listOf(
 
             Tables build up row-by-row as the stream arrives — watch each row appear as it's
             typed.
+        """.trimIndent(),
+    ),
+    DemoStream(
+        name = "Footnotes",
+        content = """
+            ## Footnotes
+
+            Streaming Markdown can cite sources[^source] or add a second note[^detail] without
+            interrupting the paragraph.
+
+            The references become superscripts, while definitions render below the response.
+
+            [^source]: This definition is parsed as it arrives and supports **bold** text.
+            [^detail]: Footnotes are prefix-stable, just like the rest of the typewriter stream.
         """.trimIndent(),
     ),
 )
