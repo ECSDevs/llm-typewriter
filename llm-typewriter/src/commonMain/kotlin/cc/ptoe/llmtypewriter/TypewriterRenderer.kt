@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -108,7 +109,12 @@ internal sealed class MdBlock {
      *  wrapped line via [FlowRow] so math sits inline with surrounding words (not on its own row). */
     data class InlineRunWithMath(val segments: List<InlineSegment>) : MdBlock()
     data class BlockQuote(val lines: List<MdToken.BlockQuote>) : MdBlock()
-    data class Heading(val level: Int, val text: String) : MdBlock()
+    /**
+     * A Markdown heading. [tokens] is the heading's inline content (already parsed into tokens by
+     * [parseStreamingMarkdown]); the renderer paints them with a bold + scaled-font style so
+     * inline formatting (`**bold**`, `` `code` ``, `[link](url)`, …) works inside headings.
+     */
+    data class Heading(val level: Int, val tokens: List<MdToken>) : MdBlock()
     data object HorizontalRule : MdBlock()
     data class Image(val altText: String, val url: String) : MdBlock()
     data class Code(val token: MdToken.CodeBlock) : MdBlock()
@@ -178,7 +184,7 @@ private fun planBlocks(tokens: List<MdToken>, styles: MarkdownStyles): List<MdBl
         if (group.size == 1) {
             when (val tok = group[0]) {
                 is MdToken.CodeBlock -> { blocks += MdBlock.Code(tok); continue }
-                is MdToken.Heading -> { blocks += MdBlock.Heading(tok.level, tok.text); continue }
+                is MdToken.Heading -> { blocks += MdBlock.Heading(tok.level, tok.inline); continue }
                 MdToken.HorizontalRule -> { blocks += MdBlock.HorizontalRule; continue }
                 is MdToken.Image -> { blocks += MdBlock.Image(tok.altText, tok.url); continue }
                 is MdToken.DisplayMath -> { blocks += MdBlock.DisplayMath(tok.content); continue }
@@ -442,11 +448,22 @@ private fun RenderMarkdownStream(
                     val baseSize = base.fontSize.let { fs ->
                         if (fs.value > 0f) fs else 16.sp
                     }
-                    val style = base.copy(
+                    val headingStyle = base.copy(
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                         fontSize = baseSize * headingScale(block.level),
                     )
-                    Text(text = block.text, style = style)
+                    // Render the heading's inline tokens so bold / italic / inline code / links /
+                    // inline math all work inside `# …`. ProvideTextStyle propagates the bold +
+                    // scaled font to descendants (inline math measurer, inline code renderer) so
+                    // equations and code spans inside a heading sit at the heading's size, not the
+                    // body size.
+                    ProvideTextStyle(headingStyle) {
+                        if (block.tokens.any { it is MdToken.InlineMath }) {
+                            RenderInlineRunWithMath(buildInlineSegments(block.tokens, styles), styles)
+                        } else {
+                            RenderInlineText(block.tokens, styles)
+                        }
+                    }
                 }
                 MdBlock.HorizontalRule -> {
                     Box(
@@ -1148,7 +1165,9 @@ private fun appendInlineTokens(
                     ),
                 ) { append("[${tok.label}]") }
                 is MdToken.Image -> append(tok.altText)
-                is MdToken.Heading -> withStyle(styles.heading) { append(tok.text) }
+                is MdToken.Heading -> withStyle(styles.heading) {
+                    appendInlineTokens(this, tok.inline, styles)
+                }
                 is MdToken.CodeBlock, MdToken.Newline, MdToken.HorizontalRule -> { /* block-level */ }
                 is MdToken.ListItem, is MdToken.BlockQuote, is MdToken.Table, is MdToken.FootnoteDefinition -> {
                     /* block-level */

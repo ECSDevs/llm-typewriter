@@ -257,7 +257,7 @@ val renderer = rememberMarkdownTypewriterRenderer(
 
 | Syntax | Renders as |
 |---|---|
-| `# H1` … `###### H6` | Headings, scaled 1.8× / 1.5× / 1.3× / 1.1× / 1.0× / 0.9× of body size |
+| `# H1` … `###### H6` | Headings, scaled 1.8× / 1.5× / 1.3× / 1.1× / 1.0× / 0.9× of body size. Inline formatting (`**bold**`, `_italic_`, `` `code` ``, `[link](url)`, `$math$`) works inside headings. |
 | `**bold**` | Bold (SemiBold) |
 | `*italic*` | Italic |
 | `***bold italic***` | Bold + italic |

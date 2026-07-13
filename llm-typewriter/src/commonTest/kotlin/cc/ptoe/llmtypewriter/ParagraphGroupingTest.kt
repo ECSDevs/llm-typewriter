@@ -54,12 +54,12 @@ class ParagraphGroupingTest {
         // A single newline right after a block-level token (heading) shouldn't seed the next
         // paragraph with a leading space.
         val tokens = listOf(
-            MdToken.Heading(1, "Title"),
+            MdToken.Heading(1, listOf(MdToken.Plain("Title"))),
             MdToken.Newline,
             MdToken.Plain("body"),
         )
         assertEquals(
-            listOf(listOf(MdToken.Heading(1, "Title")), listOf(MdToken.Plain("body"))),
+            listOf(listOf(MdToken.Heading(1, listOf(MdToken.Plain("Title")))), listOf(MdToken.Plain("body"))),
             groupIntoParagraphs(tokens),
         )
     }
@@ -69,7 +69,7 @@ class ParagraphGroupingTest {
         val tokens = listOf(
             MdToken.Plain("intro"),
             MdToken.Newline,
-            MdToken.Heading(2, "Section"),
+            MdToken.Heading(2, listOf(MdToken.Plain("Section"))),
             MdToken.Plain("after"),
         )
         // The single newline before the heading is a block-boundary newline → dropped (no space
@@ -77,7 +77,7 @@ class ParagraphGroupingTest {
         assertEquals(
             listOf(
                 listOf(MdToken.Plain("intro")),
-                listOf(MdToken.Heading(2, "Section")),
+                listOf(MdToken.Heading(2, listOf(MdToken.Plain("Section")))),
                 listOf(MdToken.Plain("after")),
             ),
             groupIntoParagraphs(tokens),
@@ -235,7 +235,7 @@ class ParagraphGroupingTest {
         // A single newline between a list item and a block-level token (e.g. heading) is dropped
         // — no leading-space seed in the heading's group.
         val a = MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("a")))
-        val h = MdToken.Heading(2, "Section")
+        val h = MdToken.Heading(2, listOf(MdToken.Plain("Section")))
         val tokens = listOf(a, MdToken.Newline, h)
         assertEquals(
             listOf(listOf(a), listOf(h)),

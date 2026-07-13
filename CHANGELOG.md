@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Maven dependency scopes.** Compose and Kotlin coroutines dependencies used by the public API
+  are now published with compile scope, while internal Coil, Highlights, and AndroidMath
+  dependencies remain runtime-only.
+
+- **Inline formatting inside headings.** `MdToken.Heading` now carries `inline: List<MdToken>`
+  instead of a raw `text: String` — the heading's content is run through `parseStreamingMarkdown`
+  at parse time, so `**bold**`, `*italic*`, `` `code` ``, `[link](url)`, `$math$`, etc. all render
+  inside `# …` lines. The renderer paints the heading's inline tokens with the bold + scaled-font
+  heading style, and `ProvideTextStyle` propagates that style to descendants (inline math, inline
+  code) so equations and code spans sit at the heading's size, not the body size. Prefix stability
+  is preserved: as the heading line streams in, earlier inline tokens stay stable (same pattern as
+  `ListItem` and `BlockQuote`).
+
 - **Markdown task lists.** The streaming parser now recognises GFM task-list items
   (`- [ ]` / `- [x]`, also `*` / `+` markers and uppercase `[X]`). `MdToken.ListItem` gains a
   `checked: Boolean?` field (`null` for plain items, `false` / `true` for task items); the

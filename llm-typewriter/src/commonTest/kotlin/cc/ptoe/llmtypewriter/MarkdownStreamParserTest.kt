@@ -119,16 +119,73 @@ class MarkdownStreamParserTest {
     @Test
     fun heading_levelOneTwoSix() {
         assertEquals(
-            listOf(MdToken.Heading(1, "Title")),
+            listOf(MdToken.Heading(1, listOf(MdToken.Plain("Title")))),
             parseStreamingMarkdown("# Title"),
         )
         assertEquals(
-            listOf(MdToken.Heading(2, "Sub")),
+            listOf(MdToken.Heading(2, listOf(MdToken.Plain("Sub")))),
             parseStreamingMarkdown("## Sub"),
         )
         assertEquals(
-            listOf(MdToken.Heading(6, "Tiny")),
+            listOf(MdToken.Heading(6, listOf(MdToken.Plain("Tiny")))),
             parseStreamingMarkdown("###### Tiny"),
+        )
+    }
+
+    @Test
+    fun heading_inlineFormattingParsed() {
+        // Bold, italic, inline code, and links all parse inside a heading — the heading's text
+        // content is run through parseStreamingMarkdown just like a list item or block quote.
+        val tokens = parseStreamingMarkdown("# Hello **world** and `code`")
+        val heading = tokens.single() as MdToken.Heading
+        assertEquals(1, heading.level)
+        assertEquals(
+            listOf(
+                MdToken.Plain("Hello "),
+                MdToken.Bold("world"),
+                MdToken.Plain(" and "),
+                MdToken.InlineCode("code"),
+            ),
+            heading.inline,
+        )
+    }
+
+    @Test
+    fun heading_inlineMathParsed() {
+        // Inline math delimiters work inside headings.
+        val tokens = parseStreamingMarkdown("# Formula \$E=mc^2\$ here")
+        val heading = tokens.single() as MdToken.Heading
+        assertEquals(
+            listOf(
+                MdToken.Plain("Formula "),
+                MdToken.InlineMath("E=mc^2", closed = true),
+                MdToken.Plain(" here"),
+            ),
+            heading.inline,
+        )
+    }
+
+    @Test
+    fun heading_prefixStability_growingBold() {
+        // As the heading streams in char-by-char, the prefix of inline tokens stays stable — the
+        // trailing `**` re-classifies from Plain to Bold once the close arrives.
+        val full = "# Hello **world**"
+        // While `**` is unclosed, the heading's inline is a single Plain carrying the trailing
+        // `**` as literal text. Pick a prefix where the close hasn't arrived yet.
+        val beforeClose = parseStreamingMarkdown(full.substring(0, "# Hello **world".length))
+        val headingBefore = beforeClose.single() as MdToken.Heading
+        assertEquals(
+            listOf(MdToken.Plain("Hello **world")),
+            headingBefore.inline,
+            "before close: inline should be a single Plain carrying the unclosed **",
+        )
+        // Once the closing `**` arrives, the Plain prefix stays stable ("Hello ") and the trailing
+        // text re-classifies to Bold("world").
+        val final = (parseStreamingMarkdown(full).single() as MdToken.Heading).inline
+        assertEquals(
+            listOf(MdToken.Plain("Hello "), MdToken.Bold("world")),
+            final,
+            "after close: Plain prefix must stay stable, trailing text re-classifies to Bold",
         )
     }
 

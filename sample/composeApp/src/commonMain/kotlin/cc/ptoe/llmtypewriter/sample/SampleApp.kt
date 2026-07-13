@@ -108,6 +108,10 @@ private val DemoStreams = listOf(
             Markdown supports **bold**, _italic_, **_bold italic_**, ~~strikethrough~~, and
             `inline code`. It also supports [links to the docs](https://kotlinlang.org).
 
+            Inline formatting works inside headings too — try `# **Bold** _and_ \`code\``:
+
+            # **Bold** _and_ `code` in a heading
+
             Block quotes become styled callouts:
             > Streaming Markdown stays prefix-stable while the quote grows.
             > A second `>` line joins the same box.

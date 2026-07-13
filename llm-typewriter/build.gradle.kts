@@ -36,13 +36,16 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.animation)
-            implementation(compose.ui)
-            implementation(compose.material3)
+            // These types are part of the public API and must be compile-scope dependencies in
+            // the generated Maven POM. Otherwise Maven consumers cannot compile calls that use
+            // Flow, Modifier, TextStyle, Color, or Compose annotations.
+            api(compose.runtime)
+            api(compose.foundation)
+            api(compose.animation)
+            api(compose.ui)
+            api(compose.material3)
             implementation(libs.coil.compose)
-            implementation(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.coroutines.core)
             implementation(libs.highlights)
         }
         commonTest.dependencies {

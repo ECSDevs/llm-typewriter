@@ -38,8 +38,16 @@ sealed class MdToken {
     /** A footnote definition: `[^label]: text` at the start of a line. */
     data class FootnoteDefinition(val label: String, val inline: List<MdToken>) : MdToken()
 
-    /** Heading: `# ...` / `## ...` etc. Level is 1..6, capped. */
-    data class Heading(val level: Int, val text: String) : MdToken()
+    /**
+     * Heading: `# ...` / `## ...` etc. Level is 1..6, capped.
+     *
+     * [inline] is the heading's text content parsed into tokens by [parseStreamingMarkdown] at
+     * parse time, so inline formatting (`**bold**`, `*italic*`, `` `code` ``, `[link](url)`,
+     * `$math$`, …) works inside headings — matching the pattern used by [ListItem] and
+     * [BlockQuote]. As the heading line streams in, [inline] is re-parsed from scratch on each
+     * growth; earlier tokens stay stable because [parseStreamingMarkdown] is itself prefix-stable.
+     */
+    data class Heading(val level: Int, val inline: List<MdToken>) : MdToken()
 
     /** Newline — emitted as its own token for layout purposes. */
     data object Newline : MdToken()
@@ -456,7 +464,12 @@ private fun consumeHeading(input: String, start: Int, out: MutableList<MdToken>)
     if (j >= input.length || input[j] != ' ') return start
     j++ // consume the space
     val lineEnd = input.indexOf('\n', startIndex = j).let { if (it < 0) input.length else it }
-    out += MdToken.Heading(level, input.substring(j, lineEnd).trimEnd())
+    val content = input.substring(j, lineEnd).trimEnd()
+    // Recursively parse the inline content of the heading. The recursive call sees no `\n`, so it
+    // can't itself emit a CodeBlock fence or another Heading (those require `\n` boundaries) —
+    // only inline spans (bold / italic / inline code / inline math / links). Same pattern as
+    // [consumeListItemIfAny] and [consumeBlockQuoteIfAny].
+    out += MdToken.Heading(level, parseStreamingMarkdown(content))
     return lineEnd
 }
 
