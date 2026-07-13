@@ -1,11 +1,16 @@
 package cc.ptoe.llmtypewriter
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
@@ -22,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -29,7 +35,10 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -42,7 +51,7 @@ import androidx.compose.ui.unit.TextUnit
  * Two implementations ship out of the box:
  *  - [PlainTypewriterRenderer] — paints raw text in the current text style. Zero parsing cost.
  *  - [MarkdownTypewriterRenderer] — re-parses the revealed string every recomposition and paints
- *    headings, bold/italic/code/strikethrough/links inline. Fenced code blocks are painted as
+ *    headings, bold/italic/code/strikethrough/links/images inline. Fenced code blocks are painted as
  *    full-width blocks with syntax highlighting that builds up as the fence grows.
  */
 fun interface TypewriterRenderer {
@@ -91,13 +100,17 @@ fun MarkdownTypewriterRenderer(
  */
 internal sealed class MdBlock {
     data class Inline(val annotated: AnnotatedString) : MdBlock()
+    data class InlineWithImages(val tokens: List<MdToken>) : MdBlock()
     /** Inline run that contains math segments interleaved with text — laid out on a single
      *  wrapped line via [FlowRow] so math sits inline with surrounding words (not on its own row). */
     data class InlineRunWithMath(val segments: List<InlineSegment>) : MdBlock()
     data class Heading(val level: Int, val text: String) : MdBlock()
+    data class Image(val altText: String, val url: String) : MdBlock()
     data class Code(val token: MdToken.CodeBlock) : MdBlock()
     /** Display math `$$...$$` — block-level, centered, with background. */
     data class DisplayMath(val content: String) : MdBlock()
+    /** GFM table — header row + aligned data rows, rendered as a bordered grid. */
+    data class Table(val token: MdToken.Table) : MdBlock()
     /**
      * A list (ordered or unordered). Built from a run of [MdToken.ListItem] tokens via
      * [buildListBlock]. The first item's [startNumber] becomes the list's start number for
@@ -150,12 +163,17 @@ private fun planBlocks(tokens: List<MdToken>, styles: MarkdownStyles): List<MdBl
             when (val tok = group[0]) {
                 is MdToken.CodeBlock -> { blocks += MdBlock.Code(tok); continue }
                 is MdToken.Heading -> { blocks += MdBlock.Heading(tok.level, tok.text); continue }
+                is MdToken.Image -> { blocks += MdBlock.Image(tok.altText, tok.url); continue }
                 is MdToken.DisplayMath -> { blocks += MdBlock.DisplayMath(tok.content); continue }
+                is MdToken.Table -> { blocks += MdBlock.Table(tok); continue }
                 else -> Unit
             }
         }
         val hasMath = group.any { it is MdToken.InlineMath }
-        if (hasMath) {
+        val hasImage = group.any { it is MdToken.Image }
+        if (hasImage) {
+            blocks += MdBlock.InlineWithImages(group)
+        } else if (hasMath) {
             blocks += MdBlock.InlineRunWithMath(buildInlineSegments(group, styles))
         } else {
             blocks += MdBlock.Inline(buildAnnotatedFromInline(group, styles))
@@ -248,7 +266,8 @@ private fun MutableListItem.freeze(): ListItemNode = ListItemNode(
  *  - A **single** [MdToken.Newline] is a soft break — rendered as a space so wrapped text joins
  *    across the line instead of breaking.
  *  - Block-level tokens ([MdToken.Heading], [MdToken.CodeBlock], [MdToken.DisplayMath],
- *    [MdToken.ListItem]) always start their own group and act as implicit paragraph breaks.
+ *    [MdToken.Image], [MdToken.ListItem]) always start their own group and act as implicit
+ *    paragraph breaks.
  *
  * [MdToken.ListItem] is special-cased: consecutive items with no intervening blank line go into
  * the **same** group (so the renderer can build one list tree from them). A single newline
@@ -281,7 +300,8 @@ internal fun groupIntoParagraphs(tokens: List<MdToken>): List<List<MdToken>> {
                 if (!currentIsList) flush()
                 current += tok
             }
-            is MdToken.Heading, is MdToken.CodeBlock, is MdToken.DisplayMath -> {
+            is MdToken.Heading, is MdToken.CodeBlock, is MdToken.DisplayMath, is MdToken.Image,
+            is MdToken.Table -> {
                 flush()
                 groups += mutableListOf(tok)
             }
@@ -291,7 +311,8 @@ internal fun groupIntoParagraphs(tokens: List<MdToken>): List<List<MdToken>> {
                 while (i + run < tokens.size && tokens[i + run] == MdToken.Newline) run++
                 val next = tokens.getOrNull(i + run)
                 val nextIsBlock =
-                    next is MdToken.Heading || next is MdToken.CodeBlock || next is MdToken.DisplayMath
+                    next is MdToken.Heading || next is MdToken.CodeBlock ||
+                        next is MdToken.DisplayMath || next is MdToken.Image || next is MdToken.Table
                 val currentIsList = current.firstOrNull() is MdToken.ListItem
                 val nextIsListItem = next is MdToken.ListItem
                 when {
@@ -381,6 +402,7 @@ private fun RenderMarkdownStream(
                 is MdBlock.Inline -> {
                     if (block.annotated.length > 0) Text(text = block.annotated)
                 }
+                is MdBlock.InlineWithImages -> RenderInlineWithImages(block.tokens, styles)
                 is MdBlock.InlineRunWithMath -> RenderInlineRunWithMath(block.segments, styles)
                 is MdBlock.Heading -> {
                     val base = LocalTextStyle.current
@@ -393,8 +415,10 @@ private fun RenderMarkdownStream(
                     )
                     Text(text = block.text, style = style)
                 }
+                is MdBlock.Image -> styles.imageRenderer.Render(block.url, block.altText)
                 is MdBlock.Code -> RenderCodeBlock(block.token, styles)
                 is MdBlock.DisplayMath -> RenderDisplayMath(block.content, styles)
+                is MdBlock.Table -> RenderTable(block.token, styles)
                 is MdBlock.ListBlock -> RenderList(block, styles, depth = 0)
             }
         }
@@ -549,6 +573,130 @@ private fun RenderDisplayMath(content: String, styles: MarkdownStyles) {
 }
 
 /**
+ * Renders a GFM table following Material 3 data-table conventions:
+ *  - Header row tinted with [MarkdownStyles.tableHeaderBackground] (default `surfaceContainerHigh`)
+ *    and medium-weight text.
+ *  - 1dp [MarkdownStyles.tableBorder] (default `outlineVariant`) cell dividers.
+ *  - 16dp horizontal / 12dp vertical cell padding (M3 spec).
+ *  - 12dp corner radius on the whole table (cells stay square; the outer clip rounds the grid).
+ *
+ * Each column gets equal width via [RowScope.weight]. Cell text is inline-parsed (so bold /
+ * italic / inline code / links work inside cells) and aligned per the separator row's colons.
+ * Rows with fewer cells than the header are padded with empty cells; extra cells are truncated.
+ */
+@Composable
+private fun RenderTable(token: MdToken.Table, styles: MarkdownStyles) {
+    val baseStyle = LocalTextStyle.current
+    val borderColor = styles.tableBorder.takeIf { it != Color.Unspecified }
+        ?: LocalContentColor.current.copy(alpha = 0.3f)
+    val headerBackground = styles.tableHeaderBackground.takeIf { it != Color.Unspecified }
+        ?: Color.Transparent
+    val tableBackground = styles.tableBackground.takeIf { it != Color.Unspecified }
+        ?: Color.Transparent
+    val columnCount = token.headers.size
+    val tableShape = RoundedCornerShape(12.dp)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(tableBackground, tableShape)
+            .clip(tableShape)
+            .border(1.dp, borderColor, tableShape),
+    ) {
+        // Header row. height(IntrinsicSize.Min) + fillMaxHeight() on each cell ensures all cells
+        // in a row stretch to the tallest cell's height (so borders align when one cell wraps).
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+                .background(headerBackground)
+                .drawBehind { drawLine(borderColor, androidx.compose.ui.geometry.Offset(0f, size.height - 0.5f), androidx.compose.ui.geometry.Offset(size.width, size.height - 0.5f), 1.dp.toPx()) },
+            verticalAlignment = Alignment.Top,
+        ) {
+            token.headers.forEachIndexed { index, header ->
+                val align = token.aligns.getOrNull(index) ?: TableAlign.DEFAULT
+                TableCell(
+                    text = header,
+                    align = align,
+                    borderColor = borderColor,
+                    isLastColumn = index == columnCount - 1,
+                    style = baseStyle.copy(fontWeight = FontWeight.Medium),
+                    styles = styles,
+                )
+            }
+        }
+        // Data rows.
+        token.rows.forEach { row ->
+            Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+                .drawBehind { drawLine(borderColor, androidx.compose.ui.geometry.Offset(0f, size.height - 0.5f), androidx.compose.ui.geometry.Offset(size.width, size.height - 0.5f), 1.dp.toPx()) },
+                verticalAlignment = Alignment.Top,
+            ) {
+                for (i in 0 until columnCount) {
+                    val cellText = row.getOrNull(i) ?: ""
+                    val align = token.aligns.getOrNull(i) ?: TableAlign.DEFAULT
+                    TableCell(
+                        text = cellText,
+                        align = align,
+                        borderColor = borderColor,
+                        isLastColumn = i == columnCount - 1,
+                        style = baseStyle,
+                        styles = styles,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One cell in a table row. Uses [RowScope.weight] so columns share the row width equally.
+ * [fillMaxHeight] (paired with [IntrinsicSize.Min] on the parent Row) stretches each cell to the
+ * tallest cell's height so borders align even when one cell's text wraps to multiple lines.
+ * Cell padding follows the M3 data-table spec: 16dp horizontal / 12dp vertical. The cell text is
+ * inline-parsed via [parseStreamingMarkdown] so inline formatting (bold, code, links, …) works
+ * inside cells. [TextAlign] is derived from the column's [TableAlign].
+ */
+@Composable
+private fun RowScope.TableCell(
+    text: String,
+    align: TableAlign,
+    borderColor: Color,
+    isLastColumn: Boolean,
+    style: TextStyle,
+    styles: MarkdownStyles,
+) {
+    val textAlign = when (align) {
+        TableAlign.LEFT, TableAlign.DEFAULT -> TextAlign.Start
+        TableAlign.CENTER -> TextAlign.Center
+        TableAlign.RIGHT -> TextAlign.End
+    }
+    val annotated = remember(text, styles) {
+        buildAnnotatedFromInline(parseStreamingMarkdown(text), styles)
+    }
+    Text(
+        text = annotated,
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .drawBehind {
+                if (!isLastColumn) {
+                    drawLine(
+                        color = borderColor,
+                        start = androidx.compose.ui.geometry.Offset(size.width - 0.5f, 0f),
+                        end = androidx.compose.ui.geometry.Offset(size.width - 0.5f, size.height),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                }
+            }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        style = style.copy(textAlign = textAlign),
+    )
+}
+
+/**
  * Renders a list (ordered or unordered). Each item is laid out as a [Row]: a fixed-width marker
  * column on the left (e.g. `•`, `1.`, `10.`) and the item's inline content on the right.
  *
@@ -617,12 +765,39 @@ private fun RenderList(block: MdBlock.ListBlock, styles: MarkdownStyles, depth: 
  */
 @Composable
 private fun RenderItemInline(tokens: List<MdToken>, styles: MarkdownStyles) {
+    if (tokens.any { it is MdToken.Image }) {
+        RenderInlineWithImages(tokens, styles)
+        return
+    }
     val hasMath = tokens.any { it is MdToken.InlineMath }
     if (hasMath) {
         RenderInlineRunWithMath(buildInlineSegments(tokens, styles), styles)
     } else {
         val annotated = buildAnnotatedFromInline(tokens, styles)
         if (annotated.length > 0) Text(text = annotated)
+    }
+}
+
+@Composable
+private fun RenderInlineWithImages(tokens: List<MdToken>, styles: MarkdownStyles) {
+    val textTokens = mutableListOf<MdToken>()
+    @Composable
+    fun flushText() {
+        if (textTokens.isEmpty()) return
+        val annotated = buildAnnotatedFromInline(textTokens, styles)
+        if (annotated.isNotEmpty()) Text(text = annotated)
+        textTokens.clear()
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (token in tokens) {
+            if (token is MdToken.Image) {
+                flushText()
+                styles.imageRenderer.Render(token.url, token.altText)
+            } else {
+                textTokens += token
+            }
+        }
+        flushText()
     }
 }
 
@@ -658,12 +833,15 @@ internal fun buildAnnotatedFromInline(tokens: List<MdToken>, styles: MarkdownSty
                         styles = TextLinkStyles(style = styles.link),
                     ),
                 ) { append(tok.label) }
+                is MdToken.Image -> append(tok.altText)
                 is MdToken.Heading -> withStyle(styles.heading) { append(tok.text) }
                 is MdToken.CodeBlock, MdToken.Newline -> { /* block-level — handled by the caller */ }
                 // List items are block-level — routed to [buildListBlock] by [planBlocks]. Should
                 // never reach this inline-assembly path; emit nothing so they're not rendered as
                 // raw `toString()` text.
                 is MdToken.ListItem -> { /* block-level — handled by [RenderList] */ }
+                // Tables are block-level — routed to [RenderTable] by [planBlocks].
+                is MdToken.Table -> { /* block-level — handled by [RenderTable] */ }
                 // Math tokens are rendered as dedicated blocks by [planBlocks]. They should never
                 // reach this inline-assembly path; if they do, emit raw content so no characters
                 // are silently dropped.

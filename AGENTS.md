@@ -55,13 +55,14 @@ from the tag (`v0.2.0` → `0.2.0`); override locally with `-Pversion=...`.
 | `StreamingTypewriter.kt` | Composables: `StreamingTypewriter`, `TypewriterText`, `CyclingTypewriterText`. |
 | `StreamingTypewriterState.kt` | Phase machine + reveal buffer + headless state container. |
 | `SpeedCurve.kt` | `Linear` / `EaseOut` / `Natural` reveal cadences. |
-| `TypewriterRenderer.kt` | `TypewriterRenderer` interface + `Plain` + `Markdown` renderers. |
-| `MarkdownStreamParser.kt` | Prefix-stable streaming Markdown parser (includes `$…$` / `$$…$$` math delimiters). |
+| `TypewriterRenderer.kt` | `TypewriterRenderer` interface + `Plain` + `Markdown` renderers, including image hook wiring. |
+| `MarkdownStreamParser.kt` | Prefix-stable streaming Markdown parser (images, links, and `$…$` / `$$…$$` math delimiters). |
 | `TexParser.kt` | Prefix-stable lexer for TeX math fragments (`\command`, `{group}`, `^`/`_` scripts, `%comment`). Retained for prefix-stability testing and future programmatic AST use — rendering is now delegated to AndroidMath (see `MathRendering.kt`). |
 | `MathAst.kt` | Semantic AST built from `TexToken`s — fractions, sqrt, sub/sup, big operators, symbols, delimiters. Retained for testing; no longer used by the renderer. |
 | `MathRendering.kt` | `expect` declaration of `RenderPlatformMath` — renders a complete LaTeX fragment via the platform's math backend. |
 | `CodeHighlighter.kt` | Kotlin / JS / TS / Python syntax highlighter. |
 | `MarkdownStyles.kt` | Style record for the Markdown renderer (math color / display background / display scale). |
+| `ImageLoading.kt` | `expect` declaration for the platform-default Coil `ImageLoader` used by markdown images. |
 | `Cursor.kt` | `Block` / `Line` / `Underscore` / `None` / `Custom` cursors. |
 | `ThinkingIndicator.kt` | Three pulsing dots. |
 | `LlmTypewriterDefaults.kt` | Defaults — base delay, blink period, theme-derived styles. |
@@ -72,6 +73,7 @@ from the tag (`v0.2.0` → `0.2.0`); override locally with `-Pversion=...`.
 | File | Responsibility |
 |---|---|
 | `MathRendering.android.kt` | `actual` implementation — delegates to [AndroidMath](https://github.com/gregcockroft/AndroidMath)'s `MTMathView` via `AndroidView`. Renders LaTeX with native Freetype + Latin Modern Math / Tex Gyre Termes / XITS Math fonts. |
+| `ImageLoading.android.kt` | `actual` implementation — builds the default Coil `ImageLoader` with an explicit OkHttp network fetcher for markdown images. |
 
 Tests:
 - `src/commonTest/` — pure-logic tests (parser, highlighter, state, speed curves, TeX parser, math AST). No Compose runtime.
@@ -97,6 +99,9 @@ Tests:
 - **Math renders only after the fragment is complete.** `RenderPlatformMath` is called once the
   closing `$` / `$$` has arrived — never with a half-formed LaTeX string. Before that, the parser
   emits the partial input as plain text.
+- **Image loading stays replaceable.** Markdown image URLs are parsed in common code and the
+  default `MarkdownStyles.imageRenderer` uses Coil; applications may replace it with their own
+  loader or cache.
 
 ## Conventions
 

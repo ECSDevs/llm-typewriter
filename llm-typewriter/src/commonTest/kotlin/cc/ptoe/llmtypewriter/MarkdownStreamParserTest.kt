@@ -84,6 +84,31 @@ class MarkdownStreamParserTest {
     }
 
     @Test
+    fun image_simple() {
+        assertEquals(
+            listOf(
+                MdToken.Plain("see "),
+                MdToken.Image("a cat", "https://example.com/cat.png"),
+            ),
+            parseStreamingMarkdown("see ![a cat](https://example.com/cat.png)"),
+        )
+    }
+
+    @Test
+    fun image_prefixIsPlainUntilClosed() {
+        val full = "![alt](https://example.com/image.png)"
+        for (length in 1 until full.length) {
+            assertTrue(parseStreamingMarkdown(full.substring(0, length)).none {
+                it is MdToken.Image
+            }, "image token appeared before close at length=$length")
+        }
+        assertEquals(
+            listOf(MdToken.Image("alt", "https://example.com/image.png")),
+            parseStreamingMarkdown(full),
+        )
+    }
+
+    @Test
     fun heading_levelOneTwoSix() {
         assertEquals(
             listOf(MdToken.Heading(1, "Title")),
@@ -575,5 +600,201 @@ class MarkdownStreamParserTest {
         val italic = parseStreamingMarkdown("*item*")
         assertTrue(italic.any { it is MdToken.Italic })
         assertTrue(italic.none { it is MdToken.ListItem })
+    }
+
+    // --- Tables ---
+
+    @Test
+    fun table_basic() {
+        val tokens = parseStreamingMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |")
+        val table = tokens.single() as MdToken.Table
+        assertEquals(listOf("Name", "Age"), table.headers)
+        assertEquals(listOf(TableAlign.DEFAULT, TableAlign.DEFAULT), table.aligns)
+        assertEquals(
+            listOf(listOf("Alice", "30"), listOf("Bob", "25")),
+            table.rows,
+        )
+    }
+
+    @Test
+    fun table_alignments() {
+        val tokens = parseStreamingMarkdown(
+            "| L | C | R | D |\n| :--- | :---: | ---: | --- |\n| a | b | c | d |",
+        )
+        val table = tokens.single() as MdToken.Table
+        assertEquals(
+            listOf(TableAlign.LEFT, TableAlign.CENTER, TableAlign.RIGHT, TableAlign.DEFAULT),
+            table.aligns,
+        )
+    }
+
+    @Test
+    fun table_noDataRows_openAtEndOfInput() {
+        // Header + separator, no data rows — table at end of input → closed = false (rows might
+        // still stream in).
+        val tokens = parseStreamingMarkdown("| a | b |\n| --- | --- |")
+        val table = tokens.single() as MdToken.Table
+        assertEquals(listOf("a", "b"), table.headers)
+        assertEquals(emptyList<List<String>>(), table.rows)
+        assertEquals(false, table.closed)
+    }
+
+    @Test
+    fun table_closed_whenFollowedByText() {
+        val tokens = parseStreamingMarkdown("| a | b |\n| --- | --- |\n| 1 | 2 |\nAfter table.")
+        val table = tokens.filterIsInstance<MdToken.Table>().single()
+        assertEquals(true, table.closed)
+        assertEquals(listOf(listOf("1", "2")), table.rows)
+        // The text after the table is a separate Plain token.
+        assertTrue(tokens.any { it is MdToken.Plain && it.text == "After table." })
+    }
+
+    @Test
+    fun table_open_atEndOfInput() {
+        val tokens = parseStreamingMarkdown("| a | b |\n| --- | --- |\n| 1 | 2 |")
+        val table = tokens.single() as MdToken.Table
+        assertEquals(false, table.closed)
+    }
+
+    @Test
+    fun table_headerOnly_noSeparator_isPlain() {
+        // Prefix stability: header line alone (no separator) is NOT a table yet.
+        val tokens = parseStreamingMarkdown("| a | b |")
+        assertTrue(tokens.none { it is MdToken.Table })
+        assertTrue(tokens.any { it is MdToken.Plain })
+    }
+
+    @Test
+    fun table_invalidSeparator_notATable() {
+        // Separator cell without a dash → not a valid separator → not a table.
+        val tokens = parseStreamingMarkdown("| a | b |\n| : | : |\n| 1 | 2 |")
+        assertTrue(tokens.none { it is MdToken.Table })
+    }
+
+    @Test
+    fun table_separatorWithLetters_notATable() {
+        val tokens = parseStreamingMarkdown("| a | b |\n| abc | def |\n| 1 | 2 |")
+        assertTrue(tokens.none { it is MdToken.Table })
+    }
+
+    @Test
+    fun table_precededByText() {
+        val tokens = parseStreamingMarkdown("Intro text\n| a | b |\n| --- | --- |\n| 1 | 2 |")
+        val table = tokens.filterIsInstance<MdToken.Table>().single()
+        assertEquals(listOf("a", "b"), table.headers)
+        // The intro text is a leading Plain token.
+        assertTrue(tokens.first() is MdToken.Plain)
+    }
+
+    @Test
+    fun table_followedByText_noNewlineTokenBetween() {
+        // The table consumes the trailing newline of its last row, so there's no Newline token
+        // between the Table and the following text.
+        val tokens = parseStreamingMarkdown("| a |\n| --- |\n| 1 |\nText")
+        val tableIdx = tokens.indexOfFirst { it is MdToken.Table }
+        assertTrue(tableIdx >= 0)
+        // The token right after the Table should be Plain("Text"), not Newline.
+        val afterTable = tokens[tableIdx + 1]
+        assertTrue(afterTable is MdToken.Plain)
+        assertEquals("Text", afterTable.text)
+    }
+
+    @Test
+    fun table_rowWithFewerCells() {
+        // A row with fewer cells than the header — the missing cells are just absent (the renderer
+        // pads with empty cells).
+        val tokens = parseStreamingMarkdown("| a | b | c |\n| --- | --- | --- |\n| 1 |")
+        val table = tokens.single() as MdToken.Table
+        assertEquals(listOf(listOf("1")), table.rows)
+    }
+
+    @Test
+    fun table_emptyCell() {
+        val tokens = parseStreamingMarkdown("| a | b |\n| --- | --- |\n| | 2 |")
+        val table = tokens.single() as MdToken.Table
+        assertEquals(listOf(listOf("", "2")), table.rows)
+    }
+
+    @Test
+    fun table_cellsStoredAsRawStrings() {
+        // Inline formatting in cells is stored as raw text (the renderer parses it at render time).
+        val tokens = parseStreamingMarkdown("| a | b |\n| --- | --- |\n| **bold** | `code` |")
+        val table = tokens.single() as MdToken.Table
+        assertEquals(listOf("**bold**", "`code`"), table.rows.first())
+    }
+
+    @Test
+    fun table_terminatedByBlankLine() {
+        // A blank line ends the table; the separator after the blank line is a new paragraph.
+        val tokens = parseStreamingMarkdown(
+            "| a | b |\n| --- | --- |\n| 1 | 2 |\n\n| c | d |\n| --- | --- |\n| 3 | 4 |",
+        )
+        val tables = tokens.filterIsInstance<MdToken.Table>()
+        assertEquals(2, tables.size)
+        assertEquals(listOf("a", "b"), tables[0].headers)
+        assertEquals(listOf("c", "d"), tables[1].headers)
+    }
+
+    @Test
+    fun table_noLeadingPipe_notATable() {
+        // Without a leading `|` at line start, the table detector doesn't fire. `a | b` is plain
+        // text (the `|` is not a special char in the inline parser).
+        val tokens = parseStreamingMarkdown("a | b\n--- | ---\n1 | 2")
+        assertTrue(tokens.none { it is MdToken.Table })
+    }
+
+    @Test
+    fun prefixStability_growingTable() {
+        val full = "| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |"
+        // While only the header line is present, no Table token should be emitted.
+        val headerOnly = "| a | b |"
+        assertTrue(parseStreamingMarkdown(headerOnly).none { it is MdToken.Table })
+
+        // Once the separator arrives, a Table token appears and stays stable as rows grow.
+        val withSep = "| a | b |\n| --- | --- |"
+        val sepTokens = parseStreamingMarkdown(withSep)
+        assertTrue(sepTokens.single() is MdToken.Table)
+        assertEquals(0, (sepTokens.single() as MdToken.Table).rows.size)
+
+        // As rows stream in, the Table token grows — earlier rows stay stable.
+        val oneRow = parseStreamingMarkdown("| a | b |\n| --- | --- |\n| 1 | 2 |")
+        val oneRowTable = oneRow.single() as MdToken.Table
+        assertEquals(listOf(listOf("1", "2")), oneRowTable.rows)
+
+        val twoRow = parseStreamingMarkdown(full)
+        val twoRowTable = twoRow.single() as MdToken.Table
+        assertEquals(listOf(listOf("1", "2"), listOf("3", "4")), twoRowTable.rows)
+        // The first row is unchanged.
+        assertEquals(listOf("1", "2"), twoRowTable.rows.first())
+    }
+
+    @Test
+    fun prefixStability_tableAfterHeadingStable() {
+        // A heading before a table must stay stable as the table grows.
+        val full = "# Title\n| a | b |\n| --- | --- |\n| 1 | 2 |"
+        // At every prefix length, the heading (if present) is always the first token.
+        for (len in 1..full.length) {
+            val toks = parseStreamingMarkdown(full.substring(0, len))
+            val first = toks.firstOrNull()
+            // Once the `# ` prefix is present, the first token should be a Heading — never
+            // re-classified to something else as the table arrives later.
+            if (len >= 7) { // "# Title" is 7 chars
+                assertTrue(first is MdToken.Heading, "len=$len: expected Heading, got $first")
+            }
+        }
+        // Final state: heading + (newline) + table. The heading doesn't consume its trailing
+        // newline, so a Newline token sits between them — but the table is always present.
+        val final = parseStreamingMarkdown(full)
+        assertTrue(final[0] is MdToken.Heading)
+        assertTrue(final.any { it is MdToken.Table })
+    }
+
+    @Test
+    fun table_singleDashSeparator() {
+        // A single dash per cell is enough for a valid separator.
+        val tokens = parseStreamingMarkdown("| a | b |\n| - | - |\n| 1 | 2 |")
+        val table = tokens.single() as MdToken.Table
+        assertEquals(listOf(TableAlign.DEFAULT, TableAlign.DEFAULT), table.aligns)
+        assertEquals(listOf(listOf("1", "2")), table.rows)
     }
 }

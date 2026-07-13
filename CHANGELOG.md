@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Markdown images.** `![alt text](url)` is parsed as `MdToken.Image` and rendered through the
+  configurable `MarkdownStyles.imageRenderer` composable hook. The default uses Coil to load
+  remote images, while applications can plug in their own loader or cache.
+
+- **GFM tables.** The streaming Markdown parser now recognises GFM-style tables (`| a | b |`
+  header + `| --- | --- |` separator + `| 1 | 2 |` data rows). Each table is emitted as a
+  `MdToken.Table` whose cells are stored as raw strings and inline-parsed at render time, so
+  bold, italic, inline code, and links work inside cells. Column alignment is derived from
+  the separator row's colons (`:---` left, `:---:` center, `---:` right, `---` default).
+  The renderer paints a bordered grid with a tinted header row (`MarkdownStyles.tableBorder`
+  / `tableHeaderBackground`) and per-column `TextAlign`. Rows stream in one-by-one as the
+  table grows; the parser is prefix-stable — a header line alone (no separator yet) renders
+  as plain text and re-classifies to a `Table` token once the separator arrives.
+
 - **Ordered & unordered lists.** The streaming Markdown parser now recognises unordered
   (`-` / `*` / `+`) and ordered (`1.` / `1)`) list markers at line start, including indented
   nesting (2-space indent unit). Each list item is emitted as a `MdToken.ListItem` whose inline
@@ -18,6 +32,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `---` (horizontal rule territory), and dates like `2024.01.01` do **not** trigger list parsing.
 
 ### Fixed
+- **Markdown image diagnostics.** The default markdown image renderer now distinguishes loading
+  and error states in its fallback UI and logs Android image-load failures through `Log.e`, so
+  remote-image issues can be diagnosed from a single repro.
+
+- **Markdown image network wiring.** The default markdown image renderer now uses an explicit
+  Android Coil `ImageLoader` with `OkHttpNetworkFetcherFactory` instead of relying on implicit
+  component discovery. This fixes remote markdown images falling back to alt text even when the
+  device has working network connectivity.
+
+- **Markdown image fallback and sizing.** The default Coil-backed `MarkdownStyles.imageRenderer`
+  no longer collapses to zero height while a remote image is unresolved, which made images appear
+  missing in streamed markdown. It now reserves visible space during loading, preserves a real
+  aspect ratio once the image resolves, and falls back to the Markdown alt text when the request
+  fails.
+
+- **Markdown table styling.** Reworked GFM tables as rounded Material 3 surfaces with a surface
+  container background, a tinted header, single interior dividers, and a visible outer outline.
+  The outer shape now clips row backgrounds cleanly without cutting away the four rounded corners.
+
 - **Publishing:** moved the `listenablefuture` exclusion from a build-local
   `configurations.all { exclude(...) }` rule onto the `AndroidMath` dependency
   declaration itself. The previous rule only affected the library's own build
@@ -31,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unrelated dependencies.
 
 ### Changed
+- **Sample app image demo.** Replaced the Wikimedia markdown image URL in the sample stream with
+  `https://picsum.photos/200` after Wikimedia responded with HTTP 403 to the app's image request.
+
 - **Attribution:** declared the project as a fork of
   [`NadeemIqbal/llm-typewriter`](https://github.com/NadeemIqbal/llm-typewriter).
   Added a "Credits" section to the README, an upstream copyright notice to the
@@ -40,9 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   work); all code — original and modified — remains Apache 2.0.
 - **Sample app:** the single "New stream" button (which auto-cycled the demo
   responses) has been replaced with a row of named stream chips — "Markdown &
-  code", "Python", "Plain text", "Math", "Lists". Tapping a chip plays that
-  stream directly, and the currently-loaded stream is highlighted. The playback
-  controls (Stop / Resume / Speed) moved into a separate row.
+  code", "Python", "Plain text", "Math", "Lists", "Tables". Tapping a chip
+  plays that stream directly, and the currently-loaded stream is highlighted.
+  The playback controls (Stop / Resume / Speed) moved into a separate row.
 
 ## [0.1.0] - 2026-07-12
 

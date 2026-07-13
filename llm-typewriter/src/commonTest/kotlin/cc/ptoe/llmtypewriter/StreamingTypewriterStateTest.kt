@@ -159,4 +159,29 @@ class StreamingTypewriterStateTest {
         state.completeSource()
         assertEquals(false, state.isStreaming)
     }
+
+    @Test
+    fun revealedTokens_wordStreamedMarkdownImageInsideListItem_eventuallyBecomesImageToken() {
+        val state = StreamingTypewriterState()
+        val markdown = "- Images are handed to the configurable image renderer: ![Earth from Artemis II](https://upload.wikimedia.org/wikipedia/commons/6/63/Earth_From_the_Perspective_of_Artemis_II.jpg)"
+
+        val pieces = mutableListOf<String>()
+        val builder = StringBuilder()
+        for (ch in markdown) {
+            builder.append(ch)
+            if (ch == ' ' || ch == '\n') {
+                pieces += builder.toString()
+                builder.clear()
+            }
+        }
+        if (builder.isNotEmpty()) pieces += builder.toString()
+
+        for (piece in pieces) {
+            state.appendToken(piece)
+            state.skipToEnd()
+        }
+
+        val item = state.revealedTokens().single() as MdToken.ListItem
+        assertTrue(item.inline.any { it is MdToken.Image })
+    }
 }

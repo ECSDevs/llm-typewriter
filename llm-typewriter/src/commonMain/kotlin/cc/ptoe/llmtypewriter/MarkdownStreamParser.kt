@@ -29,6 +29,9 @@ sealed class MdToken {
     /** Link: `[label](url)`. */
     data class Link(val label: String, val url: String) : MdToken()
 
+    /** Image: `![alt text](url)`. The renderer receives both the URL and alt text. */
+    data class Image(val altText: String, val url: String) : MdToken()
+
     /** Heading: `# ...` / `## ...` etc. Level is 1..6, capped. */
     data class Heading(val level: Int, val text: String) : MdToken()
 
@@ -81,7 +84,31 @@ sealed class MdToken {
         val indent: Int,
         val inline: List<MdToken>,
     ) : MdToken()
+
+    /**
+     * A GFM-style table. [headers] are the raw header cell texts (inline-parsed at render time);
+     * [aligns] carries per-column alignment derived from the separator row's colons
+     * ([TableAlign.DEFAULT] when the separator had no colons); [rows] is the list of data rows,
+     * each a list of raw cell texts. [closed] is `false` while the table is at the end of the
+     * input and might still grow more rows — the renderer paints whatever rows are present either
+     * way, so [closed] is informational and does not affect rendering.
+     *
+     * Prefix-stability note: a header line alone (no separator yet) is emitted as plain/inline
+     * tokens. Once the separator line arrives, the trailing plain tokens re-classify into a
+     * single [Table] token. As subsequent rows stream in, the [Table] token grows (rows are
+     * appended) — earlier rows stay stable. A row being typed (incomplete, no closing `|`) is
+     * still consumed as a row; its cells are split from whatever content is present.
+     */
+    data class Table(
+        val headers: List<String>,
+        val aligns: List<TableAlign>,
+        val rows: List<List<String>>,
+        val closed: Boolean,
+    ) : MdToken()
 }
+
+/** Per-column alignment for a [MdToken.Table], derived from the separator row's colons. */
+enum class TableAlign { DEFAULT, LEFT, CENTER, RIGHT }
 
 /**
  * A best-effort, prefix-stable streaming markdown parser.
@@ -97,8 +124,10 @@ sealed class MdToken {
  *   - Bold+italic (`***` / `___`)
  *   - Strikethrough (`~~`)
  *   - Links (`[label](url)`)
+ *   - Images (`![alt text](url)`)
  *   - Unordered lists (`-` / `*` / `+` at line start, optionally indented for nesting)
  *   - Ordered lists (`1.` / `1)` at line start, optionally indented for nesting)
+ *   - GFM tables (`| a | b |` header + `| --- | --- |` separator + data rows)
  *
  * Open spans at the tail of the input are rendered as plain text until they close — but the
  * tokens before them are stable, so the live renderer doesn't reflow earlier text.
@@ -151,6 +180,19 @@ internal fun parseStreamingMarkdown(input: String): List<MdToken> {
                 // the start of a new line — list items chain without an intervening Newline
                 // token, which is what lets `groupIntoParagraphs` treat consecutive items as one
                 // list group.
+                atLineStart = true
+                continue
+            }
+        }
+
+        // Tables — a `|` at line start begins a table only if the *next* line is a valid
+        // separator (`| --- | --- |`). Until the separator arrives, the header line falls
+        // through to inline parsing (plain text) — prefix-stable: the trailing plain tokens
+        // re-classify into a Table token once the separator lands.
+        if (atLineStart && c == '|') {
+            val tableEnd = consumeTableIfAny(input, i, out)
+            if (tableEnd > i) {
+                i = tableEnd
                 atLineStart = true
                 continue
             }
@@ -261,6 +303,13 @@ internal fun parseStreamingMarkdown(input: String): List<MdToken> {
                 continue
             }
         }
+        if (c == '!' && i + 1 < len && input[i + 1] == '[') {
+            val imageEnd = consumeImage(input, i, out)
+            if (imageEnd > i) {
+                i = imageEnd
+                continue
+            }
+        }
         if (c == '[') {
             val linkEnd = consumeLink(input, i, out)
             if (linkEnd > i) {
@@ -281,7 +330,7 @@ private fun nextSpecial(s: String, from: Int): Int {
     var j = from
     while (j < s.length) {
         val c = s[j]
-        if (c == '\n' || c == '`' || c == '*' || c == '_' || c == '~' || c == '[' || c == '#' || c == '$') break
+        if (c == '\n' || c == '`' || c == '*' || c == '_' || c == '~' || c == '[' || c == '!' || c == '#' || c == '$') break
         j++
     }
     return j
@@ -453,6 +502,125 @@ private fun consumeLink(input: String, start: Int, out: MutableList<MdToken>): I
     val url = input.substring(labelClose + 2, urlClose)
     out += MdToken.Link(label, url)
     return urlClose + 1
+}
+
+private fun consumeImage(input: String, start: Int, out: MutableList<MdToken>): Int {
+    val labelClose = input.indexOf(']', startIndex = start + 2)
+    if (labelClose < 0 || labelClose + 1 >= input.length || input[labelClose + 1] != '(') return start
+    val urlClose = input.indexOf(')', startIndex = labelClose + 2)
+    if (urlClose < 0) return start
+    out += MdToken.Image(
+        altText = input.substring(start + 2, labelClose),
+        url = input.substring(labelClose + 2, urlClose),
+    )
+    return urlClose + 1
+}
+
+/**
+ * Tries to consume a GFM-style table starting at [start] (which is at a line start, with the
+ * first char being `|`). On match, emits a [MdToken.Table] to [out] and returns the index past
+ * the last consumed row's trailing newline (so the next iteration is at line start again). On no
+ * match, returns [start] unchanged so the caller falls through to inline parsing.
+ *
+ * A table requires:
+ *   1. A header line containing `|`.
+ *   2. A separator line immediately after — each cell matches `:?-+:?` (optional colon, one+
+ *      dashes, optional colon), deriving [TableAlign] per column.
+ *   3. Zero or more data rows, each a `|`-delimited line.
+ *
+ * The table ends at the first line that doesn't start with `|` (after optional spaces), at a
+ * blank line, or at end of input. [MdToken.Table.closed] is `false` when the table extends to
+ * end of input (more rows might stream in); `true` when a non-table line follows.
+ *
+ * Prefix stability: while only the header line is present (no separator yet), this returns
+ * [start] → the header falls through to inline parsing as plain text. Once the separator
+ * arrives, the trailing plain tokens re-classify into a [MdToken.Table].
+ */
+private fun consumeTableIfAny(input: String, start: Int, out: MutableList<MdToken>): Int {
+    val len = input.length
+    // Header line: from `start` to next newline (or end of input).
+    val headerLineEnd = input.indexOf('\n', startIndex = start).let { if (it < 0) len else it }
+    val headerLine = input.substring(start, headerLineEnd)
+    // Header must contain at least one `|` to be a table header.
+    if (!headerLine.contains('|')) return start
+    // Need a second line (the separator). If the header is at end of input (no newline), no
+    // separator can exist yet → not a table.
+    if (headerLineEnd >= len) return start
+    // Separator line: from headerLineEnd+1 to next newline (or end of input).
+    val sepLineEnd = input.indexOf('\n', startIndex = headerLineEnd + 1).let { if (it < 0) len else it }
+    val sepLine = input.substring(headerLineEnd + 1, sepLineEnd)
+    // Validate separator and extract alignments.
+    val aligns = parseSeparatorAligns(sepLine) ?: return start
+    // Parse header cells.
+    val headers = splitTableCells(headerLine)
+    // Consume subsequent `|`-delimited lines as rows.
+    val rows = mutableListOf<List<String>>()
+    var j = if (sepLineEnd < len) sepLineEnd + 1 else len
+    // closed = false while the table extends to end of input (might grow); set true when a
+    // non-table line follows.
+    var closed = false
+    while (j < len) {
+        val rowLineEnd = input.indexOf('\n', startIndex = j).let { if (it < 0) len else it }
+        val rowLine = input.substring(j, rowLineEnd)
+        // A row must start with `|` (after optional leading spaces). A blank line or any other
+        // content ends the table.
+        val firstNonSpace = rowLine.indexOfFirst { !it.isWhitespace() }
+        if (firstNonSpace < 0 || rowLine[firstNonSpace] != '|') {
+            closed = true
+            break
+        }
+        rows += splitTableCells(rowLine)
+        j = if (rowLineEnd < len) rowLineEnd + 1 else len
+        // If we reached end of input, the table might still grow → closed stays false.
+    }
+    out += MdToken.Table(headers, aligns, rows, closed)
+    return j
+}
+
+/**
+ * Splits a `|`-delimited table line into trimmed cell texts. A leading `|` (which produces an
+ * empty first element) and a trailing `|` (empty last element) are stripped — so `| a | b |`
+ * yields `["a", "b"]` and `a | b` yields `["a", "b"]` too. Interior empty cells (`||`) are
+ * preserved as empty strings.
+ */
+private fun splitTableCells(line: String): List<String> {
+    val parts = line.split('|')
+    var startIdx = 0
+    var endIdx = parts.size
+    if (startIdx < endIdx && parts[startIdx].isEmpty()) startIdx++
+    if (endIdx > startIdx && parts[endIdx - 1].isEmpty()) endIdx--
+    return parts.subList(startIdx, endIdx).map { it.trim() }
+}
+
+/**
+ * Validates a separator line and extracts per-column [TableAlign] from the colons. Each cell
+ * must match `:?-+:?` — optional leading colon, one+ dashes, optional trailing colon. Returns
+ * `null` if the line is not a valid separator (no cells, empty cells, or cells with invalid
+ * characters).
+ */
+private fun parseSeparatorAligns(line: String): List<TableAlign>? {
+    val cells = splitTableCells(line)
+    if (cells.isEmpty()) return null
+    val aligns = mutableListOf<TableAlign>()
+    for (cell in cells) {
+        if (cell.isEmpty()) return null
+        var s = 0
+        var e = cell.length
+        val leftColon = s < e && cell[s] == ':'
+        if (leftColon) s++
+        val rightColon = s < e && cell[e - 1] == ':'
+        if (rightColon) e--
+        // The middle must be all dashes and non-empty.
+        if (s >= e) return null
+        for (k in s until e) if (cell[k] != '-') return null
+        aligns += when {
+            leftColon && rightColon -> TableAlign.CENTER
+            rightColon -> TableAlign.RIGHT
+            leftColon -> TableAlign.LEFT
+            else -> TableAlign.DEFAULT
+        }
+    }
+    return aligns
 }
 
 internal fun mergeAdjacentPlain(input: List<MdToken>): List<MdToken> {

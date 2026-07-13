@@ -5,6 +5,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
@@ -155,5 +156,26 @@ class StreamingTypewriterUiTest {
         // Not asserting exact text — the cycling animation may have moved past — just verifying
         // the composable renders without crashing.
         onNodeWithTag("llm_typewriter_cycling", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun markdownImageError_showsAltTextFallback() = runComposeUiTest {
+        val state = StreamingTypewriterState()
+        setContent {
+            MaterialTheme {
+                StreamingTypewriter(
+                    tokens = remember { MutableSharedFlow() },
+                    state = state,
+                    renderer = rememberMarkdownTypewriterRenderer(state),
+                    baseDelayMs = 0L,
+                )
+            }
+        }
+        state.appendToken("![demo alt](bad://image)")
+        state.skipToEnd()
+        waitUntil(timeoutMillis = 5_000) {
+            state.revealed == "![demo alt](bad://image)"
+        }
+        onNodeWithText("demo alt", substring = false, useUnmergedTree = true).assertIsDisplayed()
     }
 }

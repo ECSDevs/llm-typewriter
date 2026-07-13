@@ -56,6 +56,9 @@ object LlmTypewriterDefaults {
         ),
         displayMathBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
         displayScale = 1.2f,
+        tableBorder = MaterialTheme.colorScheme.outlineVariant,
+        tableHeaderBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tableBackground = MaterialTheme.colorScheme.surfaceContainer,
     )
 
     /** The same as [markdownStyles] but takes an explicit color scheme for testing. */
@@ -86,5 +89,8 @@ object LlmTypewriterDefaults {
         math = SpanStyle(),
         displayMathBackground = surfaceVariant.copy(alpha = 0.4f),
         displayScale = 1.2f,
+        tableBorder = outline, // M3: outlineVariant; tests pass the primary palette only
+        tableHeaderBackground = surfaceVariant, // M3: surfaceContainerHigh
+        tableBackground = surfaceVariant, // M3: surfaceContainer
     )
 }

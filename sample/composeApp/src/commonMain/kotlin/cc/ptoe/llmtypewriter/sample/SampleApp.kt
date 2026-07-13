@@ -88,6 +88,7 @@ private val DemoStreams = listOf(
             - Headings render once the line completes
             - Bold/italic flip the moment the closing delimiter arrives
             - Inline `code` works too
+            - Images are handed to the configurable image renderer: ![Random sample image](https://picsum.photos/200)
 
             Tap me to skip to the end.
         """.trimIndent(),
@@ -160,6 +161,34 @@ private val DemoStreams = listOf(
             Lists can also interrupt paragraphs without a blank line,
             - like this
             - and this
+        """.trimIndent(),
+    ),
+    DemoStream(
+        name = "Tables",
+        content = """
+            ## Tables
+
+            GFM tables render with aligned columns and a bordered grid:
+
+            | Feature | Status | Notes |
+            | :--- | :---: | ---: |
+            | Headings | Yes | `#`–`######` |
+            | Bold/italic | Yes | `**bold**` |
+            | Code blocks | Yes | fenced ``` |
+            | Math | Yes | ${'$'}x^2${'$'} inline |
+            | **Tables** | **Yes** | this one! |
+
+            Cells support inline formatting — **bold**, _italic_, `code`, and links like
+            [Kotlin](https://kotlinlang.org) all work inside cells.
+
+            | Command | Description |
+            | --- | --- |
+            | `git status` | Show working tree status |
+            | `git add .` | Stage all changes |
+            | `git commit` | Record changes to the repo |
+
+            Tables build up row-by-row as the stream arrives — watch each row appear as it's
+            typed.
         """.trimIndent(),
     ),
 )

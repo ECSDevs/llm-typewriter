@@ -1,8 +1,30 @@
 package cc.ptoe.llmtypewriter
 
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Composable
+import androidx.compose.material3.Text
+import coil3.compose.SubcomposeAsyncImage
+import coil3.compose.SubcomposeAsyncImageContent
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.unit.dp
+
+/** Composable hook used to load and paint a Markdown image URL. */
+fun interface MarkdownImageRenderer {
+    @Composable
+    fun Render(url: String, altText: String)
+}
 
 /**
  * Style overrides used by [MarkdownTypewriterRenderer] when painting a markdown stream.
@@ -36,4 +58,49 @@ data class MarkdownStyles(
     val displayMathBackground: Color = Color.Unspecified,
     /** Scale multiplier applied to the base font size when rendering display math. */
     val displayScale: Float = 1.2f,
+    /** Border color for GFM table cells. */
+    val tableBorder: Color = Color.Unspecified,
+    /** Background tint for the header row of a GFM table. */
+    val tableHeaderBackground: Color = Color.Unspecified,
+    /** Background color for the rounded GFM table surface. */
+    val tableBackground: Color = Color.Unspecified,
+    /** Image loader/renderer. The default uses Coil; applications can replace it if needed. */
+    val imageRenderer: MarkdownImageRenderer = MarkdownImageRenderer { url, altText ->
+        val shape = RoundedCornerShape(8.dp)
+        val fallbackLabel = altText.ifBlank { url }
+        val imageLoader = rememberPlatformImageLoader()
+        val imageModifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 96.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant, shape)
+        SubcomposeAsyncImage(
+            model = url,
+            imageLoader = imageLoader,
+            contentDescription = altText,
+            contentScale = ContentScale.FillWidth,
+            modifier = imageModifier,
+            loading = {
+                if (fallbackLabel.isNotEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp)) {
+                        Text(
+                            text = "loading: $fallbackLabel",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            onError = { state ->
+                logPlatformImageLoadError(url, state.result.throwable)
+            },
+            error = {
+                Box(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp)) {
+                    Text(
+                        text = "error: $fallbackLabel",
+                        color = LocalContentColor.current,
+                    )
+                }
+            },
+            success = { SubcomposeAsyncImageContent() },
+        )
+    },
 )

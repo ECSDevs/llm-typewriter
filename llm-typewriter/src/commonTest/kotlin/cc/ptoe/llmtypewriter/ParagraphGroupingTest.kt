@@ -246,4 +246,27 @@ class ParagraphGroupingTest {
             groupIntoParagraphs(tokens),
         )
     }
+
+    // --- Tables ---
+
+    @Test
+    fun table_isOwnGroup_andBreaksParagraph() {
+        val table = MdToken.Table(
+            headers = listOf("a", "b"),
+            aligns = listOf(TableAlign.DEFAULT, TableAlign.DEFAULT),
+            rows = listOf(listOf("1", "2")),
+            closed = true,
+        )
+        val tokens = listOf(MdToken.Plain("intro"), MdToken.Newline, table, MdToken.Newline, MdToken.Plain("after"))
+        // The single newline before the table is a block-boundary newline → dropped. The table is
+        // its own group; "after" starts a new group.
+        assertEquals(
+            listOf(
+                listOf(MdToken.Plain("intro")),
+                listOf(table),
+                listOf(MdToken.Plain("after")),
+            ),
+            groupIntoParagraphs(tokens),
+        )
+    }
 }

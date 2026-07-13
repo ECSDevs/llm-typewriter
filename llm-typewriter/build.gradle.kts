@@ -41,6 +41,7 @@ kotlin {
             implementation(compose.animation)
             implementation(compose.ui)
             implementation(compose.material3)
+            implementation(libs.coil.compose)
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
@@ -59,6 +60,7 @@ kotlin {
                 implementation("com.github.gregcockroft:AndroidMath:v1.1.0") {
                     exclude(group = "com.google.guava", module = "listenablefuture")
                 }
+                implementation(libs.coil.network.okhttp)
             }
         }
 
