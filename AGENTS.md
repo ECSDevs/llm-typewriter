@@ -43,8 +43,10 @@ JDK 17 is used on CI; JVM target for Kotlin/Android is 11.
 ## Release
 
 Tag-driven. Pushing a `v*` tag triggers `.github/workflows/publish.yml`, which publishes to
-Maven Central via `com.vanniktech.maven.publish` and creates a GitHub Release. The version comes
-from the tag (`v0.2.0` → `0.2.0`); override locally with `-Pversion=...`.
+Maven Central via `com.vanniktech.maven.publish`, builds the signed sample APK, and creates a
+GitHub Release with the APK attached. The version comes from the tag (`v0.2.0` → `0.2.0`);
+override locally with `-Pversion=...`. The publish workflow requires the Maven/signing secrets
+and the sample signing secrets documented in `.github/workflows/publish.yml`.
 
 ## Library source layout
 

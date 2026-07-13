@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Sample app releases.** Tag pushes now attach the signed sample APK to the GitHub Release.
+
 - **Removed the cursor.** The buggy cursor composable and cursor parameters were removed from
   all typewriter entry points.
 
