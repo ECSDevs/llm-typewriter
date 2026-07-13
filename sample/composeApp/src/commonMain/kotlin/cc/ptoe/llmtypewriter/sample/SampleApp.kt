@@ -198,6 +198,15 @@ private val DemoStreams = listOf(
             4. The next item follows sequentially
             5. Each item supports formatting too — **bold**, _italic_, `code`
 
+            A **task** list (GFM checkbox syntax — `- [ ]` / `- [x]`):
+
+            - [x] Stream tokens as a live typewriter
+            - [x] Render Markdown with syntax-highlighted code
+            - [ ] Support nested task items:
+              - [x] Parse `- [ ]` / `- [x]` markers
+              - [ ] Tappable checkboxes (display-only for now)
+            - [ ] Ship the next release
+
             Lists can also interrupt paragraphs without a blank line,
             - like this
             - and this

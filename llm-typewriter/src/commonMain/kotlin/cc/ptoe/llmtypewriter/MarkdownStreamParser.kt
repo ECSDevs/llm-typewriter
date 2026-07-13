@@ -78,6 +78,10 @@ sealed class MdToken {
      * - [indent] is the leading-space count divided by 2 (so `  - sub` has `indent = 1`).
      *    Two-space indent unit mirrors the most common LLM output; larger indents still nest one
      *    level per [indent] step.
+     * - [checked] is `null` for a plain item. For a GFM task-list item (`- [ ]` / `- [x]`), it is
+     *    `false` (unchecked) or `true` (checked, accepts `x` or `X`). The renderer shows the
+     *    Unicode ballot-box glyph (`☐` / `☑`) in place of the bullet marker when [checked] is
+     *    non-null.
      * - [inline] is the inline content parsed from the rest of the line after the marker. Single
      *    line only — multi-line list items (continuation lines) are not yet supported; the parser
      *    falls back to treating each non-marker line as its own paragraph.
@@ -85,13 +89,17 @@ sealed class MdToken {
      * Prefix-stability note: as the line grows, [inline] is re-parsed from scratch (just like a
      * [CodeBlock]'s content grows). Earlier inline tokens stay stable because
      * [parseStreamingMarkdown] is itself prefix-stable; only the trailing "open" token
-     * re-classifies once its close arrives.
+     * re-classifies once its close arrives. A partial task marker (e.g. `- [x` with no closing
+     * `]`) parses as a plain item with the `[x` text in [inline] and [checked] = `null`; once the
+     * `]` arrives the trailing token re-classifies to a task item ([checked] flips to `true`,
+     * [inline] shrinks to whatever follows the marker).
      */
     data class ListItem(
         val ordered: Boolean,
         val number: Int,
         val indent: Int,
         val inline: List<MdToken>,
+        val checked: Boolean? = null,
     ) : MdToken()
 
     /**
@@ -152,6 +160,7 @@ enum class TableAlign { DEFAULT, LEFT, CENTER, RIGHT }
  *   - Block quotes (`> quote` / `>> nested quote`)
  *   - Unordered lists (`-` / `*` / `+` at line start, optionally indented for nesting)
  *   - Ordered lists (`1.` / `1)` at line start, optionally indented for nesting)
+ *   - Task list items (`- [ ]` / `- [x]` after any unordered or ordered marker)
  *   - Horizontal split lines (`---` at line start)
  *   - GFM tables (`| a | b |` header + `| --- | --- |` separator + data rows)
  *
@@ -476,6 +485,11 @@ private fun consumeHorizontalRuleIfAny(input: String, start: Int, out: MutableLi
  * convention. A single leading space is treated as indent 0 (some style guides use one-space
  * indents); 3 spaces round down to 1, 4 to 2, etc. (CommonMark treats tabs and varying spaces
  * specially; we deliberately stay simpler to keep prefix-stability tractable).
+ *
+ * GFM task list items are detected after the marker: a `[ ]` or `[x]` / `[X]` immediately
+ * following the marker's single space (and followed by a space or end-of-line) flips
+ * [MdToken.ListItem.checked] to `false` / `true`. Partial markers (`- [x` with no closing `]`)
+ * parse as a plain item — the trailing token re-classifies once the `]` arrives.
  */
 private fun consumeListItemIfAny(input: String, start: Int, out: MutableList<MdToken>): Int {
     val len = input.length
@@ -492,19 +506,59 @@ private fun consumeListItemIfAny(input: String, start: Int, out: MutableList<MdT
     val contentStart = marker.contentStart
     val lineEnd = input.indexOf('\n', startIndex = contentStart).let { if (it < 0) len else it }
     val content = input.substring(contentStart, lineEnd).trimEnd()
+    // Detect a GFM task-list marker: `[ ]` / `[x]` / `[X]` followed by a space or end-of-content.
+    // On a match, [checked] is non-null and the inline content starts after the marker (+ its
+    // trailing space). On no match, [checked] stays null and the whole line is the inline content.
+    val taskMarker = matchTaskMarker(content)
+    val (inlineContent, checked) = if (taskMarker != null) {
+        content.substring(taskMarker.contentStart) to taskMarker.checked
+    } else {
+        content to null
+    }
     // Recursively parse the inline content of the line. The recursive call sees no `\n`, so it
     // can't itself emit a CodeBlock fence or a Heading (those require `\n` boundaries) — only
     // inline spans (bold / italic / inline code / inline math / links).
-    val inline = parseStreamingMarkdown(content)
+    val inline = parseStreamingMarkdown(inlineContent)
     out += MdToken.ListItem(
         ordered = marker.ordered,
         number = marker.number,
         indent = indent,
         inline = inline,
+        checked = checked,
     )
     // Consume through the trailing newline so the next iteration starts at the next line — list
     // items chain without an intervening Newline token.
     return if (lineEnd < len) lineEnd + 1 else len
+}
+
+private data class TaskMarkerMatch(val checked: Boolean, val contentStart: Int)
+
+/**
+ * Matches a GFM task-list marker at the start of [content] (the text after the list marker +
+ * its single space). Returns `null` if no marker matches. A valid marker is `[ ]` (unchecked),
+ * `[x]` / `[X]` (checked), followed by either a single space or the end of [content] — matching
+ * the GFM spec's "followed by a single space or end of line" rule. The returned [contentStart]
+ * skips the marker and its trailing space (when present) so the caller can substring the
+ * remaining inline content.
+ *
+ * Prefix-stability: `- [x` (no `]` yet) returns `null` — the line parses as a plain item with
+ * `[x` as inline text. Once the `]` arrives the trailing token re-classifies to a task item.
+ */
+private fun matchTaskMarker(content: String): TaskMarkerMatch? {
+    if (content.length < 3) return null
+    if (content[0] != '[') return null
+    val c = content[1]
+    if (c != ' ' && c != 'x' && c != 'X') return null
+    if (content[2] != ']') return null
+    val checked = c != ' '
+    return when {
+        // `[ ]` or `[x]` at end of line — inline content is empty.
+        content.length == 3 -> TaskMarkerMatch(checked, contentStart = 3)
+        // `[ ] todo` — skip the trailing space; inline content starts at index 4.
+        content[3] == ' ' -> TaskMarkerMatch(checked, contentStart = 4)
+        // `[x]todo` (no space) — not a task marker, falls back to plain item.
+        else -> null
+    }
 }
 
 private fun consumeBlockQuoteIfAny(input: String, start: Int, out: MutableList<MdToken>): Int {

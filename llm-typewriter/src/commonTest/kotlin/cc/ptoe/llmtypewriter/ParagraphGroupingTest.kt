@@ -302,4 +302,45 @@ class ParagraphGroupingTest {
             groupIntoParagraphs(tokens),
         )
     }
+
+    // --- buildListBlock: task-list `checked` propagation ---
+
+    @Test
+    fun buildListBlock_propagatesCheckedFlag() {
+        // Plain and task items keep their `checked` status in the built tree.
+        val tokens = listOf(
+            MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("plain")), checked = null),
+            MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("todo")), checked = false),
+            MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("done")), checked = true),
+        )
+        val block = buildListBlock(tokens)
+        assertEquals(null, block.items[0].checked)
+        assertEquals(false, block.items[1].checked)
+        assertEquals(true, block.items[2].checked)
+    }
+
+    @Test
+    fun buildListBlock_propagatesCheckedIntoNestedSublist() {
+        // A nested task item keeps its `checked` status through the sublist tree.
+        val tokens = listOf(
+            MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("parent")), checked = true),
+            MdToken.ListItem(ordered = false, number = 0, indent = 1, inline = listOf(MdToken.Plain("child")), checked = false),
+        )
+        val block = buildListBlock(tokens)
+        assertEquals(true, block.items[0].checked)
+        assertEquals(1, block.items[0].sublists.size)
+        val child = block.items[0].sublists[0].items.single()
+        assertEquals(false, child.checked)
+        assertEquals(listOf(MdToken.Plain("child")), child.inline)
+    }
+
+    @Test
+    fun buildListBlock_defaultCheckedIsNull() {
+        // ListItem constructed without `checked` (legacy callers) defaults to null in the tree.
+        val tokens = listOf(
+            MdToken.ListItem(ordered = false, number = 0, indent = 0, inline = listOf(MdToken.Plain("a"))),
+        )
+        val block = buildListBlock(tokens)
+        assertEquals(null, block.items[0].checked)
+    }
 }

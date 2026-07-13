@@ -135,12 +135,15 @@ internal sealed class MdBlock {
 /**
  * One entry in an [MdBlock.ListBlock]. [inline] is the item's text content (already parsed into
  * tokens by the streaming parser); [sublists] are nested lists rendered indented under this item.
+ * [checked] is `null` for a plain item, `false` / `true` for a GFM task-list item — the renderer
+ * shows the Unicode ballot-box glyph (`☐` / `☑`) in place of the bullet when it is non-null.
  *
  * `internal` (not `private`) so [buildListBlock] can return it for unit testing.
  */
 internal data class ListItemNode(
     val inline: List<MdToken>,
     val sublists: List<MdBlock.ListBlock>,
+    val checked: Boolean? = null,
 )
 
 /** A segment within an [MdBlock.InlineRunWithMath] — either styled text or a math fragment.
@@ -244,7 +247,7 @@ internal fun buildListBlock(tokens: List<MdToken.ListItem>): MdBlock.ListBlock {
             top.items.last().sublists += newLevel
             stack += newLevel
         }
-        stack.last().items += MutableListItem(inline = tok.inline)
+        stack.last().items += MutableListItem(inline = tok.inline, checked = tok.checked)
     }
 
     return root.freeze()
@@ -261,6 +264,7 @@ private class MutableListLevel(
 private class MutableListItem(
     var inline: List<MdToken> = emptyList(),
     val sublists: MutableList<MutableListLevel> = mutableListOf(),
+    var checked: Boolean? = null,
 )
 
 private fun MutableListLevel.freeze(): MdBlock.ListBlock = MdBlock.ListBlock(
@@ -272,6 +276,7 @@ private fun MutableListLevel.freeze(): MdBlock.ListBlock = MdBlock.ListBlock(
 private fun MutableListItem.freeze(): ListItemNode = ListItemNode(
     inline = inline,
     sublists = sublists.map { it.freeze() },
+    checked = checked,
 )
 
 /**
@@ -743,6 +748,10 @@ private fun RowScope.TableCell(
  * Renders a list (ordered or unordered). Each item is laid out as a [Row]: a fixed-width marker
  * column on the left (e.g. `•`, `1.`, `10.`) and the item's inline content on the right.
  *
+ * Task-list items (`- [ ]` / `- [x]`) override the marker with a [TaskCheckbox] — the bullet or
+ * ordered number is replaced by the Unicode ballot-box glyph, matching GFM rendering. Non-task
+ * items in the same list keep their usual marker, so a list can mix plain and task items.
+ *
  * Nested lists (sublists on an item) are rendered indented under that item. Indentation per
  * level is `12.dp` — enough to visually distinguish nesting without consuming too much
  * horizontal space on a phone screen.
@@ -773,17 +782,25 @@ private fun RenderList(block: MdBlock.ListBlock, styles: MarkdownStyles, depth: 
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         block.items.forEachIndexed { index, item ->
+            val isTask = item.checked != null
             val markerText = if (block.ordered) {
                 "${block.startNumber + index}."
             } else {
                 "•"
             }
             Row(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = markerText,
-                    modifier = Modifier.width(markerWidth),
-                    style = baseStyle,
-                )
+                if (isTask) {
+                    TaskCheckbox(
+                        checked = item.checked == true,
+                        modifier = Modifier.width(markerWidth),
+                    )
+                } else {
+                    Text(
+                        text = markerText,
+                        modifier = Modifier.width(markerWidth),
+                        style = baseStyle,
+                    )
+                }
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -798,6 +815,19 @@ private fun RenderList(block: MdBlock.ListBlock, styles: MarkdownStyles, depth: 
             }
         }
     }
+}
+
+/**
+ * Read-only checkbox drawn for GFM task-list items (`- [ ]` / `- [x]`). Renders the Unicode
+ * ballot-box glyphs — `☐` (U+2610) when unchecked, `☑` (U+2611) when checked — so the marker
+ * matches the surrounding text style (font size, color, baseline) without any custom drawing.
+ *
+ * Not interactive — this is a typewriter display, not an editable checkbox.
+ */
+@Composable
+private fun TaskCheckbox(checked: Boolean, modifier: Modifier = Modifier) {
+    val glyph = if (checked) "\u2611" else "\u2610"
+    Text(text = glyph, modifier = modifier, style = LocalTextStyle.current)
 }
 
 /**

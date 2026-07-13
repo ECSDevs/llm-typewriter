@@ -688,6 +688,164 @@ class MarkdownStreamParserTest {
         assertTrue(italic.none { it is MdToken.ListItem })
     }
 
+    // --- Task lists ---
+
+    @Test
+    fun taskList_unchecked() {
+        val tokens = parseStreamingMarkdown("- [ ] todo")
+        val item = tokens.single() as MdToken.ListItem
+        assertEquals(false, item.checked)
+        assertEquals(listOf(MdToken.Plain("todo")), item.inline)
+    }
+
+    @Test
+    fun taskList_checked_lowercaseX() {
+        val tokens = parseStreamingMarkdown("- [x] done")
+        val item = tokens.single() as MdToken.ListItem
+        assertEquals(true, item.checked)
+        assertEquals(listOf(MdToken.Plain("done")), item.inline)
+    }
+
+    @Test
+    fun taskList_checked_uppercaseX() {
+        val tokens = parseStreamingMarkdown("- [X] done")
+        val item = tokens.single() as MdToken.ListItem
+        assertEquals(true, item.checked)
+        assertEquals(listOf(MdToken.Plain("done")), item.inline)
+    }
+
+    @Test
+    fun taskList_emptyContent() {
+        // `[ ]` at end of line (no trailing content) is a valid task marker.
+        val tokens = parseStreamingMarkdown("- [ ]")
+        val item = tokens.single() as MdToken.ListItem
+        assertEquals(false, item.checked)
+        assertEquals(emptyList<MdToken>(), item.inline)
+    }
+
+    @Test
+    fun taskList_checkedEmptyContent() {
+        val tokens = parseStreamingMarkdown("- [x]")
+        val item = tokens.single() as MdToken.ListItem
+        assertEquals(true, item.checked)
+        assertEquals(emptyList<MdToken>(), item.inline)
+    }
+
+    @Test
+    fun taskList_starAndPlusMarkers() {
+        // Task markers work with `*` and `+` markers too, not just `-`.
+        val star = parseStreamingMarkdown("* [ ] a").single() as MdToken.ListItem
+        assertEquals(false, star.checked)
+        val plus = parseStreamingMarkdown("+ [x] b").single() as MdToken.ListItem
+        assertEquals(true, plus.checked)
+    }
+
+    @Test
+    fun taskList_inlineFormattingParsed() {
+        // Task items support inline formatting just like plain items.
+        val tokens = parseStreamingMarkdown("- [x] **bold** and `code`")
+        val item = tokens.single() as MdToken.ListItem
+        assertEquals(true, item.checked)
+        assertEquals(
+            listOf(MdToken.Bold("bold"), MdToken.Plain(" and "), MdToken.InlineCode("code")),
+            item.inline,
+        )
+    }
+
+    @Test
+    fun taskList_mixedWithPlainItems() {
+        // A list can mix plain and task items; only the task items get a non-null checked.
+        val tokens = parseStreamingMarkdown("- plain\n- [ ] todo\n- [x] done")
+        val plain = tokens[0] as MdToken.ListItem
+        val todo = tokens[1] as MdToken.ListItem
+        val done = tokens[2] as MdToken.ListItem
+        assertEquals(null, plain.checked)
+        assertEquals(false, todo.checked)
+        assertEquals(true, done.checked)
+    }
+
+    @Test
+    fun taskList_noSpaceAfterCloseBracket_notATask() {
+        // `- [x]todo` (no space after `]`) is NOT a task marker per GFM — falls back to a plain
+        // item with `[x]todo` as inline content.
+        val tokens = parseStreamingMarkdown("- [x]todo")
+        val item = tokens.single() as MdToken.ListItem
+        assertEquals(null, item.checked)
+        assertEquals(listOf(MdToken.Plain("[x]todo")), item.inline)
+    }
+
+    @Test
+    fun taskList_invalidMarkerContent_notATask() {
+        // `- [y]` — `y` is not ` ` / `x` / `X`, so not a task marker.
+        val tokens = parseStreamingMarkdown("- [y] maybe")
+        val item = tokens.single() as MdToken.ListItem
+        assertEquals(null, item.checked)
+        assertEquals(listOf(MdToken.Plain("[y] maybe")), item.inline)
+    }
+
+    @Test
+    fun taskList_indented_nestingPreserved() {
+        // Indentation still drives nesting for task items.
+        val tokens = parseStreamingMarkdown("- [x] parent\n  - [ ] child")
+        val parent = tokens[0] as MdToken.ListItem
+        val child = tokens[1] as MdToken.ListItem
+        assertEquals(true, parent.checked)
+        assertEquals(0, parent.indent)
+        assertEquals(false, child.checked)
+        assertEquals(1, child.indent)
+    }
+
+    @Test
+    fun prefixStability_growingTaskMarker() {
+        // Streaming `- [ ] todo` char-by-char. Before the closing `]` arrives, the line parses
+        // as a plain list item with the partial `[` / `[ ` / `[ ]` text in inline. Once the `]`
+        // arrives, the trailing token re-classifies to a task item (checked flips from null to
+        // false, inline shrinks). After that, inline grows stably with the remaining text.
+        val full = "- [ ] todo"
+        // `- ` — empty plain item.
+        val atDash = parseStreamingMarkdown("- ")
+        assertTrue(atDash.single() is MdToken.ListItem)
+        assertEquals(null, (atDash.single() as MdToken.ListItem).checked)
+        // `- [` — partial marker, plain item with `[` inline.
+        val atOpen = parseStreamingMarkdown("- [")
+        val openItem = atOpen.single() as MdToken.ListItem
+        assertEquals(null, openItem.checked)
+        assertEquals(listOf(MdToken.Plain("[")), openItem.inline)
+        // `- [ ` (trailing space trimmed) — still `[`, not yet closed.
+        val atSpace = parseStreamingMarkdown("- [ ")
+        val spaceItem = atSpace.single() as MdToken.ListItem
+        assertEquals(null, spaceItem.checked)
+        assertEquals(listOf(MdToken.Plain("[")), spaceItem.inline)
+        // `- [ ]` — closed task marker, checked=false, empty inline.
+        val atClose = parseStreamingMarkdown("- [ ]")
+        val closedItem = atClose.single() as MdToken.ListItem
+        assertEquals(false, closedItem.checked)
+        assertEquals(emptyList<MdToken>(), closedItem.inline)
+        // `- [ ] todo` — inline grows with the remaining text, checked stays false.
+        val atFull = parseStreamingMarkdown(full).single() as MdToken.ListItem
+        assertEquals(false, atFull.checked)
+        assertEquals(listOf(MdToken.Plain("todo")), atFull.inline)
+    }
+
+    @Test
+    fun prefixStability_growingCheckedTaskMarker() {
+        // Streaming `- [x] done` char-by-char. The `x` arrives before `]`, so `- [x` is a plain
+        // item with `[x` inline. Only once `]` lands does checked flip to true.
+        val atX = parseStreamingMarkdown("- [x")
+        val xItem = atX.single() as MdToken.ListItem
+        assertEquals(null, xItem.checked)
+        assertEquals(listOf(MdToken.Plain("[x")), xItem.inline)
+
+        val atClose = parseStreamingMarkdown("- [x]")
+        val closedItem = atClose.single() as MdToken.ListItem
+        assertEquals(true, closedItem.checked)
+        assertEquals(emptyList<MdToken>(), closedItem.inline)
+
+        val atFull = parseStreamingMarkdown("- [x] done").single() as MdToken.ListItem
+        assertEquals(true, atFull.checked)
+        assertEquals(listOf(MdToken.Plain("done")), atFull.inline)
+    }
+
     // --- Tables ---
 
     @Test

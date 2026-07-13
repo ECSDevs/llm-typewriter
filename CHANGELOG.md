@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Markdown task lists.** The streaming parser now recognises GFM task-list items
+  (`- [ ]` / `- [x]`, also `*` / `+` markers and uppercase `[X]`). `MdToken.ListItem` gains a
+  `checked: Boolean?` field (`null` for plain items, `false` / `true` for task items); the
+  renderer shows the Unicode ballot-box glyphs (`☐` / `☑`) in place of the bullet marker when it
+  is non-null. Prefix stability is preserved: a partial marker (e.g. `- [x` with no closing `]`)
+  parses as a plain item and re-classifies to a task item once the `]` arrives. The sample app's
+  Lists demo includes a nested task list.
+
 - **Multi-line block quotes render as one box.** Consecutive `>` lines at the same level now
   share a single stripe + background instead of one box per line. Nested quotes (`>> deeper`)
   render as a nested box inside the parent quote. Adds a `buildQuoteTree` pure-logic helper
