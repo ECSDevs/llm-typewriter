@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Removed the cursor.** The buggy cursor composable and cursor parameters were removed from
+  all typewriter entry points.
+
 - Fixed long inline code spans overflowing the grid when rendered inside Markdown table cells.
 
 - Fixed nested bold-italic Markdown spans such as `**_bold italic_**` rendering with both styles.

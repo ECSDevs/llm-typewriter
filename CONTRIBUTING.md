@@ -15,9 +15,8 @@ llm-typewriter/                  The published library.
     MarkdownStreamParser.kt       Prefix-stable streaming markdown parser.
     CodeHighlighter.kt            Kotlin/JS/Python syntax highlighter.
     MarkdownStyles.kt             Style record for the markdown renderer.
-    Cursor.kt                     Block / Line / Underscore / None / Custom cursors.
     ThinkingIndicator.kt          Three pulsing dots.
-    LlmTypewriterDefaults.kt      Defaults — base delay, blink period, theme-derived styles.
+    LlmTypewriterDefaults.kt      Defaults — base delay and theme-derived styles.
     Helpers.kt                    staticFlowOf, wordTokenFlowOf, internal helpers.
   src/commonTest/                 Pure-logic tests (parser, highlighter, state, speed curves).
   src/androidInstrumentedTest/    Compose UI tests — run on Android device/emulator.

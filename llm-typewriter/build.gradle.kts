@@ -106,7 +106,7 @@ mavenPublishing {
             "Streaming-text typewriter composable for LLM apps on Compose — " +
                 "renders a Flow<String> token stream with live progressive Markdown, " +
                 "syntax-highlighted code blocks that build up as tokens arrive, a configurable " +
-                "blinking cursor, three speed curves (linear/easeOut/natural), tap-to-skip, " +
+                "three speed curves (linear/easeOut/natural), tap-to-skip, " +
                 "graceful stop-mid-stream, selectable text, and screen-reader-friendly a11y.",
         )
         inceptionYear.set("2026")

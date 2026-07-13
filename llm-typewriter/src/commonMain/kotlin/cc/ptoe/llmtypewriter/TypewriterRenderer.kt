@@ -414,7 +414,7 @@ private fun RenderMarkdownStream(
 ) {
     // Use the state's incrementally-cached tokens rather than re-parsing `text` from scratch.
     // Keying on the tokens list *reference* (not `text`) means non-streaming recompositions
-    // (scroll, theme switch, cursor blink) hit the cache and skip planBlocks entirely —
+    // (scroll, theme switch) hit the cache and skip planBlocks entirely —
     // revealedTokens() returns the same List instance when the revealed length is unchanged.
     // `text` still drives recomposition from the caller (state.revealed read) so new chars
     // still invalidate; it's just no longer substring-compared each frame.
@@ -1022,20 +1022,30 @@ private fun appendInlineTokens(
     builder: androidx.compose.ui.text.AnnotatedString.Builder,
     tokens: List<MdToken>,
     styles: MarkdownStyles,
+    preserveBoldWeight: Boolean = false,
 ) {
     with(builder) {
         for (tok in tokens) {
             when (tok) {
                 is MdToken.Plain -> append(tok.text)
                 is MdToken.Bold -> withStyle(styles.bold) {
-                    appendInlineTokens(this, parseStreamingMarkdown(tok.text), styles)
+                    appendInlineTokens(this, parseStreamingMarkdown(tok.text), styles, preserveBoldWeight = true)
                 }
-                is MdToken.Italic -> withStyle(styles.italic) {
-                    appendInlineTokens(this, parseStreamingMarkdown(tok.text), styles)
+                is MdToken.Italic -> {
+                    val italicStyle = if (preserveBoldWeight) {
+                        // MarkdownStyles.italic may explicitly use FontWeight.Normal. Do not let
+                        // that replace the inherited bold weight in **_bold italic_**.
+                        styles.italic.copy(fontWeight = null)
+                    } else {
+                        styles.italic
+                    }
+                    withStyle(italicStyle) {
+                        appendInlineTokens(this, parseStreamingMarkdown(tok.text), styles, preserveBoldWeight)
+                    }
                 }
                 is MdToken.BoldItalic -> withStyle(styles.bold) {
-                    withStyle(styles.italic) {
-                        appendInlineTokens(this, parseStreamingMarkdown(tok.text), styles)
+                    withStyle(styles.italic.copy(fontWeight = null)) {
+                        appendInlineTokens(this, parseStreamingMarkdown(tok.text), styles, preserveBoldWeight = true)
                     }
                 }
                 is MdToken.InlineCode -> withStyle(styles.code) { append(tok.text) }

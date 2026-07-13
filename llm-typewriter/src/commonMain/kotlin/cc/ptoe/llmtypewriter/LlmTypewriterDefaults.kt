@@ -15,9 +15,6 @@ object LlmTypewriterDefaults {
     /** Default reveal cadence: ~50 chars/second, a comfortable read for chat UIs. */
     const val DefaultBaseDelayMs: Long = 18L
 
-    /** Default cursor blink period (full on→off→on cycle). */
-    const val DefaultCursorBlinkMs: Long = 900L
-
     /**
      * Maximum buffered (unrevealed) characters before the typewriter starts collapsing — when the
      * model streams much faster than the reveal can keep up, this caps memory growth. The reveal

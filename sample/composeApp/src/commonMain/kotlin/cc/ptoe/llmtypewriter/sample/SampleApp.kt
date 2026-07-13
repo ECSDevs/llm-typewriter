@@ -43,7 +43,6 @@ import cc.ptoe.llmtypewriter.LlmTypewriterDefaults
 import cc.ptoe.llmtypewriter.SpeedCurve
 import cc.ptoe.llmtypewriter.StreamingTypewriter
 import cc.ptoe.llmtypewriter.ThinkingDots
-import cc.ptoe.llmtypewriter.TypewriterCursor
 import cc.ptoe.llmtypewriter.TypewriterPhase
 import cc.ptoe.llmtypewriter.isStreaming
 import cc.ptoe.llmtypewriter.rememberMarkdownTypewriterRenderer
@@ -369,7 +368,6 @@ private fun DemoScreen() {
                 tokens = tokenChannel,
                 state = state,
                 renderer = markdownRenderer,
-                cursor = TypewriterCursor.Line,
                 baseDelayMs = LlmTypewriterDefaults.DefaultBaseDelayMs,
                 speedCurve = currentCurve,
             )

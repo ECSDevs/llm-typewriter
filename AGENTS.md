@@ -13,7 +13,7 @@ Guidance for AI coding agents working in this repository. Read this before makin
 
 `LlmTypewriter` — a Compose library that renders a `Flow<String>` of LLM tokens as
 a live, progressively-revealed typewriter with streaming Markdown, syntax-highlighted code
-blocks, speed curves, cursors, tap-to-skip, graceful stop, and a11y live-region support.
+blocks, speed curves, tap-to-skip, graceful stop, and a11y live-region support.
 
 - Group / coordinates: `cc.ptoe:llm-typewriter`
 - License: Apache 2.0
@@ -64,7 +64,6 @@ from the tag (`v0.2.0` → `0.2.0`); override locally with `-Pversion=...`.
 | `CodeBlockFontFamily.kt` | `expect` declaration of the platform font family used by fenced markdown code blocks. |
 | `MarkdownStyles.kt` | Style record for the Markdown renderer (math color / display background / display scale). |
 | `ImageLoading.kt` | `expect` declaration for the platform-default Coil `ImageLoader` used by markdown images. |
-| `Cursor.kt` | `Block` / `Line` / `Underscore` / `None` / `Custom` cursors. |
 | `ThinkingIndicator.kt` | Three pulsing dots. |
 | `LlmTypewriterDefaults.kt` | Defaults — base delay, blink period, theme-derived styles. |
 | `Helpers.kt` | `staticFlowOf`, `wordTokenFlowOf`, internal helpers. |

@@ -25,8 +25,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 
 /**
- * Renders the [state]'s revealed text inline with a trailing blinking [cursor], wired to a token
- * source [Flow<String>] that streams the text in.
+ * Renders the [state]'s revealed text inline, wired to a token source [Flow<String>] that streams
+ * the text in.
  *
  * The reveal cadence is decided by [speedCurve] (linear/ease-out/natural — see [SpeedCurve]),
  * with a baseline [baseDelayMs]. Tap the rendered area to skip to the buffer's tail.
@@ -36,7 +36,6 @@ import kotlinx.coroutines.flow.filter
  * Test tags:
  *  - root: `llm_typewriter`
  *  - rendered text area: `llm_typewriter_text`
- *  - cursor: `llm_typewriter_cursor`
  */
 @Composable
 fun StreamingTypewriter(
@@ -44,7 +43,6 @@ fun StreamingTypewriter(
     modifier: Modifier = Modifier,
     state: StreamingTypewriterState = rememberStreamingTypewriterState(),
     renderer: TypewriterRenderer = PlainTypewriterRenderer,
-    cursor: TypewriterCursor = TypewriterCursor.Block,
     baseDelayMs: Long = LlmTypewriterDefaults.DefaultBaseDelayMs,
     speedCurve: SpeedCurve = SpeedCurve.Natural,
     tapToSkip: Boolean = true,
@@ -98,19 +96,6 @@ fun StreamingTypewriter(
             text = text,
             modifier = Modifier.testTag("llm_typewriter_text").then(accessibilityModifier),
         )
-        // Hide the cursor until at least one character is revealed — otherwise a "Thinking…"
-        // indicator hosted alongside the typewriter overlaps with a blinking cursor in the
-        // top-left, which reads as a glitch rather than a deliberate caret.
-        val showCursor = cursor !is TypewriterCursor.None &&
-            state.phase != TypewriterPhase.Done &&
-            text.isNotEmpty()
-        if (showCursor) {
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier.testTag("llm_typewriter_cursor"),
-            ) {
-                cursor.Render()
-            }
-        }
         if (state.phase == TypewriterPhase.Stopped) {
             Text(
                 text = " (stopped)",
@@ -132,7 +117,6 @@ fun TypewriterText(
     modifier: Modifier = Modifier,
     state: StreamingTypewriterState = rememberStreamingTypewriterState(),
     renderer: TypewriterRenderer = PlainTypewriterRenderer,
-    cursor: TypewriterCursor = TypewriterCursor.Block,
     baseDelayMs: Long = LlmTypewriterDefaults.DefaultBaseDelayMs,
     speedCurve: SpeedCurve = SpeedCurve.Natural,
     tapToSkip: Boolean = true,
@@ -143,7 +127,6 @@ fun TypewriterText(
         modifier = modifier,
         state = state,
         renderer = renderer,
-        cursor = cursor,
         baseDelayMs = baseDelayMs,
         speedCurve = speedCurve,
         tapToSkip = tapToSkip,
@@ -166,7 +149,6 @@ fun CyclingTypewriterText(
     holdMs: Long = 1500L,
     typeDelayMs: Long = LlmTypewriterDefaults.DefaultBaseDelayMs,
     deleteDelayMs: Long = (LlmTypewriterDefaults.DefaultBaseDelayMs / 2).coerceAtLeast(1L),
-    cursor: TypewriterCursor = TypewriterCursor.Block,
 ) {
     val state = rememberStreamingTypewriterState()
     LaunchedEffect(phrases, holdMs, typeDelayMs, deleteDelayMs) {
@@ -195,8 +177,5 @@ fun CyclingTypewriterText(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(text = state.revealed, modifier = Modifier.testTag("llm_typewriter_text"))
-        if (cursor !is TypewriterCursor.None) {
-            cursor.Render()
-        }
     }
 }

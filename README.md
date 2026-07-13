@@ -3,8 +3,8 @@
 **The streaming-text typewriter built for LLM apps on Compose.** Renders a
 `Flow<String>` of tokens with live progressive Markdown, syntax-highlighted code
 blocks that build up as tokens arrive, inline `$…$` and display `$$…$$` LaTeX
-math, three speed curves (linear / ease-out / natural), a configurable blinking
-cursor, tap-to-skip, graceful stop-mid-stream, selectable text, and a
+math, three speed curves (linear / ease-out / natural), tap-to-skip,
+graceful stop-mid-stream, selectable text, and a
 screen-reader-friendly live region.
 
 [![Maven Central](https://img.shields.io/maven-central/v/cc.ptoe/llm-typewriter)](https://central.sonatype.com/artifact/cc.ptoe/llm-typewriter)
@@ -32,7 +32,6 @@ shipped:
 | Speed curves (linear / easeOut / natural) | ✅ | ❌ linear only | ❌ linear only | ❌ |
 | Tap-to-skip | ✅ | ❌ | ❌ | ❌ |
 | Graceful stop-mid-stream | ✅ | ❌ | ❌ | partial |
-| Custom `@Composable` cursor | ✅ | ❌ | ❌ no cursor | ❌ |
 | Selectable text mid-stream | ✅ | ❌ | ❌ | partial |
 | A11y live-region announcements | ✅ | ❌ | ❌ | partial |
 | Active maintenance | ✅ | ❌ stale ~2y | ⚠️ alpha | locked in chat SDK |
@@ -100,7 +99,6 @@ fun ChatBubble(responseFlow: Flow<String>) {
         tokens = responseFlow,                              // Flow<String> from your LLM
         state = state,
         renderer = rememberMarkdownTypewriterRenderer(state), // live Markdown + code + math
-        cursor = TypewriterCursor.Line,
         speedCurve = SpeedCurve.Natural,
     )
     Button(onClick = { state.stop() }, enabled = state.isStreaming) {
@@ -111,8 +109,8 @@ fun ChatBubble(responseFlow: Flow<String>) {
 
 That's it — tokens stream in, the typewriter reveals them at a natural cadence,
 renders Markdown progressively (bold the instant `**` closes, code blocks that
-highlight as they grow, math once the closing `$` arrives), and a blinking line
-cursor trails the text. Tap the text to skip to the latest buffered token.
+highlight as they grow, and math once the closing `$` arrives). Tap the text to
+skip to the latest buffered token.
 
 ## Core composables
 
@@ -125,7 +123,6 @@ fun StreamingTypewriter(
     modifier: Modifier = Modifier,
     state: StreamingTypewriterState = rememberStreamingTypewriterState(),
     renderer: TypewriterRenderer = PlainTypewriterRenderer,
-    cursor: TypewriterCursor = TypewriterCursor.Block,
     baseDelayMs: Long = LlmTypewriterDefaults.DefaultBaseDelayMs,   // 18 ms ≈ 55 ch/s
     speedCurve: SpeedCurve = SpeedCurve.Natural,
     tapToSkip: Boolean = true,
@@ -138,14 +135,13 @@ fun StreamingTypewriter(
 | `tokens` | — | The upstream `Flow<String>`. Each emission is appended to the reveal buffer. Swapping the flow (e.g. "Regenerate") cancels the old collector and starts fresh. |
 | `state` | `rememberStreamingTypewriterState()` | Holds the buffer + reveal phase. Hoist it to drive from a `ViewModel` or to read `isStreaming` / `phase` elsewhere. |
 | `renderer` | `PlainTypewriterRenderer` | How revealed text is painted. Use `rememberMarkdownTypewriterRenderer(state)` for Markdown + code + math. |
-| `cursor` | `TypewriterCursor.Block` | Trailing caret shape. `Block` / `Line` / `Underscore` / `None` / `Custom { … }`. |
 | `baseDelayMs` | `18L` | Baseline per-character delay. The effective delay is modulated by `speedCurve`. |
 | `speedCurve` | `SpeedCurve.Natural` | Cadence curve — see [Speed curves](#speed-curves). |
 | `tapToSkip` | `true` | Tap the rendered area to flush the buffer instantly. |
 | `announceForAccessibility` | `true` | Wraps the text in a `liveRegion = Polite` semantics node so screen readers narrate progress. |
 
 **Test tags:** `llm_typewriter` (root), `llm_typewriter_text` (text area),
-`llm_typewriter_cursor` (cursor), `llm_typewriter_stopped` (stop indicator).
+`llm_typewriter_stopped` (stop indicator).
 
 ### `TypewriterText` — static text
 
@@ -155,12 +151,11 @@ builds a character-by-character flow and delegates to `StreamingTypewriter`:
 ```kotlin
 TypewriterText(
     text = "Build LLM-powered apps for Android.",
-    cursor = TypewriterCursor.Block,
     speedCurve = SpeedCurve.Natural,
 )
 ```
 
-Accepts the same `renderer`, `cursor`, `baseDelayMs`, `speedCurve`, and
+Accepts the same `renderer`, `baseDelayMs`, `speedCurve`, and
 `tapToSkip` parameters as `StreamingTypewriter`.
 
 ### `CyclingTypewriterText` — rotating banner
@@ -174,7 +169,6 @@ CyclingTypewriterText(
     holdMs = 1200L,
     typeDelayMs = 18L,
     deleteDelayMs = 9L,
-    cursor = TypewriterCursor.Line,
 )
 ```
 
@@ -316,30 +310,6 @@ guarantees the math backend never sees a half-formed LaTeX string.
 Only the `color` from `MarkdownStyles.math` is honored; AndroidMath owns the
 typography (font family, style, weight). Display-math background and scale are
 configurable via `MarkdownStyles.displayMathBackground` and `displayScale`.
-
-## Cursors
-
-| Cursor | Shape |
-|---|---|
-| `TypewriterCursor.Block` | Thick block (▮) — default |
-| `TypewriterCursor.Line` | Thin vertical line (|) |
-| `TypewriterCursor.Underscore` | Underscore (_) |
-| `TypewriterCursor.None` | No caret |
-| `TypewriterCursor.Custom { … }` | Any `@Composable` lambda |
-
-```kotlin
-StreamingTypewriter(
-    tokens = tokens,
-    cursor = TypewriterCursor.Custom {
-        Box(Modifier.size(12.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
-    },
-)
-```
-
-The cursor blinks with a 900 ms period (`LlmTypewriterDefaults.DefaultCursorBlinkMs`)
-and is hidden until the first character is revealed, and hidden again once the
-phase reaches `Done`. For a custom blink rate or shape, use
-`TypewriterCursor.Custom { … }` with your own animation.
 
 ## Speed curves
 
