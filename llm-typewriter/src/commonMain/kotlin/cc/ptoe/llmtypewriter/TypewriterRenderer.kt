@@ -955,37 +955,91 @@ private fun RenderBlockQuote(lines: List<MdToken.BlockQuote>, styles: MarkdownSt
         ?: LocalContentColor.current.copy(alpha = 0.35f)
     val backgroundColor = styles.blockQuoteBackground.takeIf { it != Color.Unspecified }
         ?: Color.Transparent
+    RenderQuoteNode(buildQuoteTree(lines), styles, stripeColor, backgroundColor)
+}
 
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+/**
+ * A quote element — either a same-level line in the current quote, or a nested quote (a run of
+ * deeper-level lines, recursively tree-built). The order of [QuoteNode.elements] preserves the
+ * source order so `> a\n>> b\n> c` renders as `[Line(a), Nested(b), Line(c)]`.
+ */
+internal sealed class QuoteElement {
+    data class Line(val line: MdToken.BlockQuote) : QuoteElement()
+    data class Nested(val subtree: QuoteNode) : QuoteElement()
+}
+
+internal data class QuoteNode(val elements: List<QuoteElement>)
+
+/**
+ * Builds a [QuoteNode] tree from a flat run of [MdToken.BlockQuote] tokens by walking level
+ * transitions: lines at the run's base level become [QuoteElement.Line]s, and any run of
+ * deeper-level lines is recursively tree-built (with levels normalized down by `baseLevel` so
+ * `baseLevel + 1` becomes level 1 in the subtree) and attached as a single [QuoteElement.Nested].
+ *
+ * Pure (no Compose dependency) so it stays unit-testable.
+ */
+internal fun buildQuoteTree(lines: List<MdToken.BlockQuote>): QuoteNode {
+    if (lines.isEmpty()) return QuoteNode(emptyList())
+    val baseLevel = lines.first().level
+    val elements = mutableListOf<QuoteElement>()
+    var i = 0
+    while (i < lines.size) {
+        if (lines[i].level == baseLevel) {
+            elements += QuoteElement.Line(lines[i])
+            i++
+        } else {
+            // Collect consecutive deeper-level lines as one nested subtree.
+            val nested = mutableListOf<MdToken.BlockQuote>()
+            while (i < lines.size && lines[i].level > baseLevel) {
+                // Normalize the level down by baseLevel so `baseLevel + 1` becomes 1 in the subtree.
+                nested += lines[i].copy(level = lines[i].level - baseLevel)
+                i++
+            }
+            elements += QuoteElement.Nested(buildQuoteTree(nested))
+        }
+    }
+    return QuoteNode(elements)
+}
+
+@Composable
+private fun RenderQuoteNode(
+    subtree: QuoteNode,
+    styles: MarkdownStyles,
+    stripeColor: Color,
+    backgroundColor: Color,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min),
+        verticalAlignment = Alignment.Top,
     ) {
-        for (line in lines) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(IntrinsicSize.Min)
-                    .padding(start = 12.dp * (line.level - 1)),
-                verticalAlignment = Alignment.Top,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(3.dp)
-                        .fillMaxHeight()
-                        .background(stripeColor, RoundedCornerShape(999.dp))
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 10.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(backgroundColor)
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                ) {
-                    if (line.inline.isEmpty()) {
-                        Spacer(modifier = Modifier.height(20.dp))
-                    } else {
-                        RenderItemInline(line.inline, styles)
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .fillMaxHeight()
+                .background(stripeColor, RoundedCornerShape(999.dp))
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 10.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(backgroundColor)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            for (element in subtree.elements) {
+                when (element) {
+                    is QuoteElement.Line -> {
+                        if (element.line.inline.isEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                        } else {
+                            RenderItemInline(element.line.inline, styles)
+                        }
+                    }
+                    is QuoteElement.Nested -> {
+                        RenderQuoteNode(element.subtree, styles, stripeColor, backgroundColor)
                     }
                 }
             }

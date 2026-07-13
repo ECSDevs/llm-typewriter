@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Multi-line block quotes render as one box.** Consecutive `>` lines at the same level now
+  share a single stripe + background instead of one box per line. Nested quotes (`>> deeper`)
+  render as a nested box inside the parent quote. Adds a `buildQuoteTree` pure-logic helper
+  (unit-tested in `QuoteTreeTest`).
+
 - **Code highlighting via [Highlights](https://github.com/SnipMeDev/Highlights).** Fenced code
   blocks now use the Highlights KMP engine for structural analysis, expanding language support
   from 3 (Kotlin / JS / Python) to 17 (C, C++, Dart, Java, Kotlin, Rust, C#, CoffeeScript,

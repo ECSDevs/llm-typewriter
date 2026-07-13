@@ -89,6 +89,8 @@ private val DemoStreams = listOf(
             - Inline `code` works too
             - Block quotes now render as quoted callouts:
               > Streaming markdown stays prefix-stable while the quote grows.
+              > Multiple `>` lines at the same level share one box.
+              >> Nested quotes render as a nested box inside.
             - Split lines render as full-width dividers:
 
             ---
@@ -108,6 +110,11 @@ private val DemoStreams = listOf(
 
             Block quotes become styled callouts:
             > Streaming Markdown stays prefix-stable while the quote grows.
+            > A second `>` line joins the same box.
+
+            Nested quotes render inside the parent:
+            > Outer quote.
+            >> Inner quote.
 
             Split lines render as full-width dividers:
 
