@@ -62,7 +62,7 @@ and the sample signing secrets documented in `.github/workflows/publish.yml`.
 | `TexParser.kt` | Prefix-stable lexer for TeX math fragments (`\command`, `{group}`, `^`/`_` scripts, `%comment`). Retained for prefix-stability testing and future programmatic AST use — rendering is now delegated to AndroidMath (see `MathRendering.kt`). |
 | `MathAst.kt` | Semantic AST built from `TexToken`s — fractions, sqrt, sub/sup, big operators, symbols, delimiters. Retained for testing; no longer used by the renderer. |
 | `MathRendering.kt` | `expect` declaration of `RenderPlatformMath` — renders a complete LaTeX fragment via the platform's math backend. |
-| `CodeHighlighter.kt` | Kotlin / JS / TS / Python syntax highlighter. |
+| `CodeHighlighter.kt` | Syntax highlighter wrapping [Highlights](https://github.com/SnipMeDev/Highlights) — maps its `CodeStructure` (keywords / strings / literals / comments) to `CodeSpan` ranges and fills gaps with `Plain`. Supports 17 languages (Kotlin, Java, JS/TS, Python, C/C++, Go, Rust, Swift, …). |
 | `CodeBlockFontFamily.kt` | `expect` declaration of the platform font family used by fenced markdown code blocks. |
 | `MarkdownStyles.kt` | Style record for the Markdown renderer (math color / display background / display scale). |
 | `ImageLoading.kt` | `expect` declaration for the platform-default Coil `ImageLoader` used by markdown images. |
@@ -122,5 +122,6 @@ Tests:
 
 - Kotlin `2.3.21`, Compose Multiplatform `1.10.3`, AGP `9.2.0`
 - `kotlinx-coroutines` `1.10.2`
+- `dev.snipme:highlights` `1.1.0` (code-block syntax analysis)
 - Android: minSdk `24`, compileSdk/targetSdk `36`
 - Target: `androidTarget`

@@ -43,6 +43,7 @@ kotlin {
             implementation(compose.material3)
             implementation(libs.coil.compose)
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.highlights)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))

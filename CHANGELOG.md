@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Code highlighting via [Highlights](https://github.com/SnipMeDev/Highlights).** Fenced code
+  blocks now use the Highlights KMP engine for structural analysis, expanding language support
+  from 3 (Kotlin / JS / Python) to 17 (C, C++, Dart, Java, Kotlin, Rust, C#, CoffeeScript,
+  JavaScript, Perl, Python, Ruby, Shell, Swift, TypeScript, Go, PHP). The internal `CodeSpan` /
+  `CodeSpanKind` / `CodeLanguage` API and the `MarkdownStyles` colour fields are unchanged, so
+  existing renderer and style customisations continue to work. Every character is still covered
+  by exactly one span (gaps between Highlights' regions are filled with `Plain`).
+
 - **Sample app releases.** Tag pushes now attach the signed sample APK to the GitHub Release.
 
 - **Removed the cursor.** The buggy cursor composable and cursor parameters were removed from

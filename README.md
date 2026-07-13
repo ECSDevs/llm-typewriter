@@ -27,7 +27,7 @@ shipped:
 |---|---|---|---|---|
 | `Flow<String>` source | ✅ | ❌ static string | ❌ static string | ✅ Android-only |
 | Live progressive Markdown | ✅ | ❌ | ❌ | ❌ |
-| Syntax-highlighted code blocks (live) | ✅ Kotlin/JS/TS/Python | ❌ | ❌ | ❌ |
+| Syntax-highlighted code blocks (live) | ✅ 17 languages (Highlights) | ❌ | ❌ | ❌ |
 | LaTeX math (`$…$` / `$$…$$`) | ✅ AndroidMath | ❌ | ❌ | ❌ |
 | Speed curves (linear / easeOut / natural) | ✅ | ❌ linear only | ❌ linear only | ❌ |
 | Tap-to-skip | ✅ | ❌ | ❌ | ❌ |
@@ -237,7 +237,7 @@ val hasText by state.rememberHasRevealedText()
 | Renderer | What it does |
 |---|---|
 | `PlainTypewriterRenderer` | Paints raw text in the ambient `TextStyle`. Zero parsing cost. |
-| `rememberMarkdownTypewriterRenderer(state)` | Live progressive Markdown — headings, bold, italic, strikethrough, inline code, links, fenced code blocks with **per-language syntax highlighting** (Kotlin / JS / TS / Python), and inline `$…$` / display `$$…$$` LaTeX math. |
+| `rememberMarkdownTypewriterRenderer(state)` | Live progressive Markdown — headings, bold, italic, strikethrough, inline code, links, fenced code blocks with **per-language syntax highlighting** via [Highlights](https://github.com/SnipMeDev/Highlights) (Kotlin, Java, JS/TS, Python, C/C++, Go, Rust, Swift, …), and inline `$…$` / display `$$…$$` LaTeX math. |
 
 ```kotlin
 // Default styles resolve against MaterialTheme

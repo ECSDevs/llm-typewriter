@@ -3,130 +3,131 @@ package cc.ptoe.llmtypewriter
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import dev.snipme.highlights.Highlights
+import dev.snipme.highlights.model.SyntaxLanguage
 
 /**
- * Spans a code-block string into ranges by token kind. The highlighter is intentionally tiny —
- * it covers the patterns most LLM coding-assistant snippets share (keywords, strings, numbers,
- * line comments, block comments) across a curated set of common languages. It's a stream-safe
- * regex-free pass: the same prefix always yields the same prefix of spans, so the live renderer
- * doesn't flicker as more code arrives.
+ * Spans a code-block string into ranges by token kind. Delegates structural analysis to the
+ * [Highlights](https://github.com/SnipMeDev/Highlights) Kotlin Multiplatform engine, which covers
+ * 17 languages (C, C++, Dart, Java, Kotlin, Rust, C#, CoffeeScript, JavaScript, Perl, Python,
+ * Ruby, Shell, Swift, TypeScript, Go, PHP).
+ *
+ * The wrapper is stream-safe: every character of [source] is covered by exactly one [CodeSpan]
+ * (gaps between Highlights' structural regions are filled with [CodeSpanKind.Plain]), so the live
+ * renderer never sees an uncoloured character as the fence grows token-by-token.
  */
 internal data class CodeSpan(val start: Int, val end: Int, val kind: CodeSpanKind)
 
 internal enum class CodeSpanKind { Keyword, StringLit, Number, Comment, Plain }
 
-/** Language-token sets we can recognise. */
-internal enum class CodeLanguage(val keywords: Set<String>) {
-    Kotlin(setOf(
-        "as", "break", "class", "continue", "do", "else", "false", "for", "fun", "if", "in",
-        "interface", "is", "null", "object", "package", "return", "super", "this", "throw",
-        "true", "try", "typealias", "typeof", "val", "var", "when", "while", "abstract", "annotation",
-        "by", "catch", "companion", "const", "constructor", "crossinline", "data", "delegate",
-        "dynamic", "enum", "external", "final", "finally", "get", "import", "infix", "init",
-        "inline", "inner", "internal", "lateinit", "noinline", "open", "operator", "out", "override",
-        "private", "protected", "public", "reified", "sealed", "set", "suspend", "tailrec", "vararg",
-    )),
-    JavaScript(setOf(
-        "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete",
-        "do", "else", "export", "extends", "false", "finally", "for", "function", "if", "import",
-        "in", "instanceof", "let", "new", "null", "of", "return", "super", "switch", "this",
-        "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield", "async",
-        "await", "static",
-    )),
-    Python(setOf(
-        "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class",
-        "continue", "def", "del", "elif", "else", "except", "finally", "for", "from", "global",
-        "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return",
-        "try", "while", "with", "yield",
-    )),
-    Plain(emptySet()),
+/**
+ * Language recognised by the highlighter. Each value maps to a [SyntaxLanguage] understood by
+ * Highlights. [Plain] maps to [SyntaxLanguage.DEFAULT] (no keyword/string/comment analysis).
+ */
+internal enum class CodeLanguage(val syntaxLanguage: SyntaxLanguage) {
+    Kotlin(SyntaxLanguage.KOTLIN),
+    JavaScript(SyntaxLanguage.JAVASCRIPT),
+    TypeScript(SyntaxLanguage.TYPESCRIPT),
+    Python(SyntaxLanguage.PYTHON),
+    Java(SyntaxLanguage.JAVA),
+    C(SyntaxLanguage.C),
+    Cpp(SyntaxLanguage.CPP),
+    CSharp(SyntaxLanguage.CSHARP),
+    Go(SyntaxLanguage.GO),
+    Rust(SyntaxLanguage.RUST),
+    Swift(SyntaxLanguage.SWIFT),
+    Ruby(SyntaxLanguage.RUBY),
+    Shell(SyntaxLanguage.SHELL),
+    Php(SyntaxLanguage.PHP),
+    Perl(SyntaxLanguage.PERL),
+    Dart(SyntaxLanguage.DART),
+    CoffeeScript(SyntaxLanguage.COFFEESCRIPT),
+    Plain(SyntaxLanguage.DEFAULT),
     ;
 
     companion object {
         fun parse(name: String?): CodeLanguage = when (name?.lowercase()) {
             "kt", "kotlin", "kts" -> Kotlin
-            "js", "javascript", "ts", "typescript", "jsx", "tsx" -> JavaScript
+            "js", "javascript", "jsx" -> JavaScript
+            "ts", "typescript", "tsx" -> TypeScript
             "py", "python" -> Python
+            "java" -> Java
+            "c" -> C
+            "cpp", "c++", "cxx" -> Cpp
+            "cs", "csharp", "c#" -> CSharp
+            "go", "golang" -> Go
+            "rs", "rust" -> Rust
+            "swift" -> Swift
+            "rb", "ruby" -> Ruby
+            "sh", "shell", "bash" -> Shell
+            "php" -> Php
+            "pl", "perl" -> Perl
+            "dart" -> Dart
+            "coffee", "coffeescript" -> CoffeeScript
             else -> Plain
         }
     }
 }
 
+/**
+ * Analyses [source] with Highlights and returns a contiguous, non-overlapping list of [CodeSpan]s
+ * covering every character. Highlights' keyword / string / literal / comment / multiline-comment
+ * regions are mapped to the corresponding [CodeSpanKind]; every unclassified character (whitespace,
+ * operators, identifiers, punctuation, annotations, marks) is filled in as [CodeSpanKind.Plain].
+ *
+ * Empty input returns an empty list.
+ */
 internal fun highlightCode(source: String, language: CodeLanguage): List<CodeSpan> {
     if (source.isEmpty()) return emptyList()
+    // Plain language skips Highlights entirely — SyntaxLanguage.DEFAULT is not a no-op (it still
+    // recognises keywords), so we short-circuit to an all-Plain result.
+    if (language == CodeLanguage.Plain) return listOf(CodeSpan(0, source.length, CodeSpanKind.Plain))
+    val structure = Highlights.Builder()
+        .code(source)
+        .language(language.syntaxLanguage)
+        .build()
+        .getCodeStructure()
+
     val spans = mutableListOf<CodeSpan>()
-    var i = 0
-    val len = source.length
-
-    while (i < len) {
-        val c = source[i]
-        // Block comment
-        if (c == '/' && i + 1 < len && source[i + 1] == '*') {
-            val end = source.indexOf("*/", startIndex = i + 2).let { if (it < 0) len else it + 2 }
-            spans += CodeSpan(i, end, CodeSpanKind.Comment)
-            i = end
-            continue
-        }
-        // Line comment (// for kt/js, # for python)
-        if (c == '/' && i + 1 < len && source[i + 1] == '/') {
-            val end = source.indexOf('\n', startIndex = i).let { if (it < 0) len else it }
-            spans += CodeSpan(i, end, CodeSpanKind.Comment)
-            i = end
-            continue
-        }
-        if (c == '#' && language == CodeLanguage.Python) {
-            val end = source.indexOf('\n', startIndex = i).let { if (it < 0) len else it }
-            spans += CodeSpan(i, end, CodeSpanKind.Comment)
-            i = end
-            continue
-        }
-        // String literal — double or single quote, escape-aware.
-        if (c == '"' || c == '\'' || c == '`') {
-            val end = closingQuote(source, i + 1, c)
-            spans += CodeSpan(i, end, CodeSpanKind.StringLit)
-            i = end
-            continue
-        }
-        // Number literal
-        if (c.isDigit()) {
-            var j = i + 1
-            while (j < len && (source[j].isDigit() || source[j] == '.' || source[j] == '_' || source[j] == 'x' ||
-                    source[j] == 'L' || source[j] == 'f' || source[j] == 'F' || source[j] == 'b')) j++
-            spans += CodeSpan(i, j, CodeSpanKind.Number)
-            i = j
-            continue
-        }
-        // Identifier — may be a keyword.
-        if (c.isLetter() || c == '_') {
-            var j = i + 1
-            while (j < len && (source[j].isLetterOrDigit() || source[j] == '_')) j++
-            val word = source.substring(i, j)
-            if (word in language.keywords) {
-                spans += CodeSpan(i, j, CodeSpanKind.Keyword)
-            } else {
-                spans += CodeSpan(i, j, CodeSpanKind.Plain)
-            }
-            i = j
-            continue
-        }
-        // Plain single char — collapse into adjacent Plain run by post-processing.
-        spans += CodeSpan(i, i + 1, CodeSpanKind.Plain)
-        i++
-    }
-
-    return collapsePlain(spans)
+    for (loc in structure.keywords) spans += CodeSpan(loc.start, loc.end, CodeSpanKind.Keyword)
+    for (loc in structure.strings) spans += CodeSpan(loc.start, loc.end, CodeSpanKind.StringLit)
+    for (loc in structure.literals) spans += CodeSpan(loc.start, loc.end, CodeSpanKind.Number)
+    for (loc in structure.comments) spans += CodeSpan(loc.start, loc.end, CodeSpanKind.Comment)
+    for (loc in structure.multilineComments) spans += CodeSpan(loc.start, loc.end, CodeSpanKind.Comment)
+    return fillGaps(spans, source.length)
 }
 
-private fun closingQuote(source: String, from: Int, quote: Char): Int {
-    var j = from
-    while (j < source.length) {
-        val c = source[j]
-        if (c == '\\' && j + 1 < source.length) { j += 2; continue }
-        if (c == quote) return j + 1
-        if (c == '\n' && quote != '`') return j // single/double quotes don't span lines in our subset
-        j++
+/**
+ * Fills the gaps between structural [spans] with [CodeSpanKind.Plain] so the result covers
+ * `[0, length)` exactly once. Overlapping or nested spans (defensive — Highlights shouldn't
+ * produce any) are resolved by keeping the first span at each position. Adjacent Plain runs are
+ * collapsed by [collapsePlain] for a compact result.
+ */
+private fun fillGaps(spans: List<CodeSpan>, length: Int): List<CodeSpan> {
+    if (length == 0) return emptyList()
+    if (spans.isEmpty()) return listOf(CodeSpan(0, length, CodeSpanKind.Plain))
+    val sorted = spans.sortedBy { it.start }
+    val result = mutableListOf<CodeSpan>()
+    var pos = 0
+    for (sp in sorted) {
+        // Skip spans that start before the current cursor (overlap/nesting) — keep first wins.
+        if (sp.start < pos) {
+            if (sp.end > pos) {
+                result += sp.copy(start = pos)
+                pos = sp.end
+            }
+            continue
+        }
+        if (sp.start > pos) {
+            result += CodeSpan(pos, sp.start, CodeSpanKind.Plain)
+        }
+        result += sp
+        pos = sp.end
     }
-    return source.length
+    if (pos < length) {
+        result += CodeSpan(pos, length, CodeSpanKind.Plain)
+    }
+    return collapsePlain(result)
 }
 
 private fun collapsePlain(spans: List<CodeSpan>): List<CodeSpan> {
