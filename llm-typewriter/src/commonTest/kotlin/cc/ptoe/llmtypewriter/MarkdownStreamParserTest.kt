@@ -297,6 +297,53 @@ class MarkdownStreamParserTest {
     }
 
     @Test
+    fun inlineMath_texDelimiters_closed() {
+        val tokens = parseStreamingMarkdown("a \\(x^2 + y^2\\) b")
+        assertEquals(
+            listOf(
+                MdToken.Plain("a "),
+                MdToken.InlineMath("x^2 + y^2", closed = true),
+                MdToken.Plain(" b"),
+            ),
+            tokens,
+        )
+    }
+
+    @Test
+    fun inlineMath_texDelimiters_multipleSpans() {
+        assertEquals(
+            listOf(
+                MdToken.InlineMath("a", closed = true),
+                MdToken.Plain(" and "),
+                MdToken.InlineMath("b", closed = true),
+            ),
+            parseStreamingMarkdown("\\(a\\) and \\(b\\)"),
+        )
+    }
+
+    @Test
+    fun prefixStability_growingTexInlineMath() {
+        val full = "\\(x^2\\)"
+        (1 until full.length).forEach { len ->
+            assertTrue(
+                parseStreamingMarkdown(full.substring(0, len)).none { it is MdToken.InlineMath },
+                "len=$len",
+            )
+        }
+        assertEquals(
+            listOf(MdToken.InlineMath("x^2", closed = true)),
+            parseStreamingMarkdown(full),
+        )
+    }
+
+    @Test
+    fun unclosedTexInlineMath_emitsPlain() {
+        val tokens = parseStreamingMarkdown("a \\(x^2")
+        assertTrue(tokens.none { it is MdToken.InlineMath })
+        assertTrue(tokens.any { it is MdToken.Plain && it.text.contains("\\(") })
+    }
+
+    @Test
     fun displayMath_closed() {
         val tokens = parseStreamingMarkdown("\$\$\\sum_{i=1}^n i^2\$\$")
         assertEquals(

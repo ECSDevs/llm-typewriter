@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **TeX-style inline math delimiters.** Streaming Markdown now recognises `\(...\)` as an
+  alternative to `$...$` for inline LaTeX, including prefix-stable handling while the closing
+  delimiter is still arriving.
+
 - **Maven dependency scopes.** Compose and Kotlin coroutines dependencies used by the public API
   are now published with compile scope, while internal Coil, Highlights, and AndroidMath
   dependencies remain runtime-only.

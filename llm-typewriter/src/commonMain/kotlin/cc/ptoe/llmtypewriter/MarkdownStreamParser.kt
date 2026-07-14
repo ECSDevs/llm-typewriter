@@ -65,9 +65,9 @@ sealed class MdToken {
     ) : MdToken()
 
     /**
-     * Inline math `$...$`. [content] is the raw TeX fragment between the delimiters. [closed] is
-     * `false` while the trailing `$` hasn't arrived yet — the renderer paints [content] as plain
-     * text in that case, then re-classifies to math once the close lands.
+     * Inline math `$...$` or `\(...\)`. [content] is the raw TeX fragment between the delimiters.
+     * [closed] is `false` while the trailing delimiter hasn't arrived yet — the renderer paints
+     * [content] as plain text in that case, then re-classifies to math once the close lands.
      */
     data class InlineMath(val content: String, val closed: Boolean) : MdToken()
 
@@ -171,6 +171,7 @@ enum class TableAlign { DEFAULT, LEFT, CENTER, RIGHT }
  *   - Task list items (`- [ ]` / `- [x]` after any unordered or ordered marker)
  *   - Horizontal split lines (`---` at line start)
  *   - GFM tables (`| a | b |` header + `| --- | --- |` separator + data rows)
+ *   - Inline math (`$...$` and `\(...\)`)
  *
  * Open spans at the tail of the input are rendered as plain text until they close — but the
  * tokens before them are stable, so the live renderer doesn't reflow earlier text.
@@ -282,6 +283,20 @@ internal fun parseStreamingMarkdown(input: String): List<MdToken> {
                 i = len
                 continue
             }
+        }
+
+        // TeX-style inline math. An unclosed opener is emitted as plain text so the partial
+        // stream remains safe to render; once `\)` arrives, the trailing plain run re-classifies.
+        if (c == '\\' && matchesAt(input, i, "\\(")) {
+            val close = input.indexOf("\\)", startIndex = i + 2)
+            if (close > i + 2) {
+                out += MdToken.InlineMath(input.substring(i + 2, close), closed = true)
+                i = close + 2
+                continue
+            }
+            out += MdToken.Plain("\\")
+            i++
+            continue
         }
 
         // Math delimiters — `$$...$$` (display) takes priority over `$...$` (inline). The inline
@@ -431,7 +446,7 @@ private fun nextSpecial(s: String, from: Int): Int {
     var j = from
     while (j < s.length) {
         val c = s[j]
-        if (c == '\n' || c == '`' || c == '*' || c == '_' || c == '~' || c == '[' || c == '!' || c == '#' || c == '$') break
+        if (c == '\n' || c == '`' || c == '*' || c == '_' || c == '~' || c == '[' || c == '!' || c == '#' || c == '$' || c == '\\') break
         j++
     }
     return j
