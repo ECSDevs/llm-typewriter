@@ -4,7 +4,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.android.kotlin.multiplatform.library)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.vanniktech.maven.publish)
@@ -25,8 +25,17 @@ kotlin {
     @OptIn(ExperimentalKotlinGradlePluginApi::class)
     applyDefaultHierarchyTemplate()
 
-    androidTarget {
-        publishLibraryVariants("release")
+    android {
+        namespace = "cc.ptoe.llmtypewriter"
+        compileSdk = libs.versions.compileSdk.get().toInt()
+        minSdk = libs.versions.minSdk.get().toInt()
+        androidResources { enable = true }
+
+        withDeviceTest {
+            instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        }
+        withHostTest { }
+
         compilations.all {
             compileTaskProvider.configure {
                 compilerOptions { jvmTarget.set(JvmTarget.JVM_11) }
@@ -55,7 +64,7 @@ kotlin {
 
         // Android-only target — AndroidMath's MTMathView (native Freetype rendering) lives here.
         // Resolved from JitPack (see settings.gradle.kts).
-        val androidMain by getting {
+        getByName("androidMain") {
             dependencies {
                 // Exclude declared on the dependency itself (not via `configurations.all`) so
                 // Gradle emits `<exclusions>` in the published POM — downstream consumers won't
@@ -70,25 +79,12 @@ kotlin {
 
         // Compose UI tests — Android instrumented tests backed by `compose.uiTest`.
         // Pure-logic tests live in `commonTest` (run as `androidUnitTest`).
-        val androidInstrumentedTest by getting {
+        getByName("androidDeviceTest") {
             dependencies {
                 @OptIn(ExperimentalComposeLibrary::class)
                 implementation(compose.uiTest)
             }
         }
-    }
-}
-
-android {
-    namespace = "cc.ptoe.llmtypewriter"
-    compileSdk = libs.versions.compileSdk.get().toInt()
-    defaultConfig {
-        minSdk = libs.versions.minSdk.get().toInt()
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
     }
 }
 

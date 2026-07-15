@@ -4,6 +4,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import cc.ptoe.llmtypewriter.R
 
 internal actual val PlatformCodeBlockFontFamily: FontFamily = FontFamily(
     Font(resId = R.font.cascadia_code_regular, weight = FontWeight.Normal),
