@@ -1,4 +1,3 @@
-import org.jetbrains.compose.ExperimentalComposeLibrary
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -48,11 +47,11 @@ kotlin {
             // These types are part of the public API and must be compile-scope dependencies in
             // the generated Maven POM. Otherwise Maven consumers cannot compile calls that use
             // Flow, Modifier, TextStyle, Color, or Compose annotations.
-            api(compose.runtime)
-            api(compose.foundation)
-            api(compose.animation)
-            api(compose.ui)
-            api(compose.material3)
+            api(libs.compose.runtime)
+            api(libs.compose.foundation)
+            api(libs.compose.animation)
+            api(libs.compose.ui)
+            api(libs.compose.material3)
             implementation(libs.coil.compose)
             api(libs.kotlinx.coroutines.core)
             implementation(libs.highlights)
@@ -81,8 +80,7 @@ kotlin {
         // Pure-logic tests live in `commonTest` (run as `androidUnitTest`).
         getByName("androidDeviceTest") {
             dependencies {
-                @OptIn(ExperimentalComposeLibrary::class)
-                implementation(compose.uiTest)
+                implementation(libs.compose.ui.test)
             }
         }
     }
