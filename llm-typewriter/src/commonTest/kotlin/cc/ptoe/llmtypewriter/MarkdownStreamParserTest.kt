@@ -1184,4 +1184,69 @@ class MarkdownStreamParserTest {
         val definition = parseStreamingMarkdown(full).single() as MdToken.FootnoteDefinition
         assertEquals(listOf(MdToken.Plain("source "), MdToken.Bold("text")), definition.inline)
     }
+
+    // --- Think blocks ---
+
+    @Test
+    fun thinkBlock_closed() {
+        val tokens = parseStreamingMarkdown("<think>thinking content</think>")
+        val thinkBlock = tokens.single() as MdToken.ThinkBlock
+        assertEquals("thinking content", thinkBlock.content)
+        assertEquals(true, thinkBlock.closed)
+    }
+
+    @Test
+    fun thinkBlock_open() {
+        val tokens = parseStreamingMarkdown("<think>partial content")
+        val thinkBlock = tokens.single() as MdToken.ThinkBlock
+        assertEquals("partial content", thinkBlock.content)
+        assertEquals(false, thinkBlock.closed)
+    }
+
+    @Test
+    fun thinkBlock_followedByText() {
+        val tokens = parseStreamingMarkdown("<think>thinking</think>\nAfter think.")
+        assertEquals(3, tokens.size)
+        val thinkBlock = tokens[0] as MdToken.ThinkBlock
+        assertEquals("thinking", thinkBlock.content)
+        assertEquals(true, thinkBlock.closed)
+        assertTrue(tokens[1] is MdToken.Newline)
+        assertEquals("After think.", (tokens[2] as MdToken.Plain).text)
+    }
+
+    @Test
+    fun thinkBlock_emptyContent() {
+        val tokens = parseStreamingMarkdown("<think></think>")
+        val thinkBlock = tokens.single() as MdToken.ThinkBlock
+        assertEquals("", thinkBlock.content)
+        assertEquals(true, thinkBlock.closed)
+    }
+
+    @Test
+    fun thinkBlock_containsInlineFormatting() {
+        val tokens = parseStreamingMarkdown("<think>**bold** and `code`</think>")
+        val thinkBlock = tokens.single() as MdToken.ThinkBlock
+        assertEquals("**bold** and `code`", thinkBlock.content)
+    }
+
+    @Test
+    fun thinkBlock_prefixStability() {
+        val full = "<think>thinking</think>"
+        for (len in 1..full.length) {
+            val tokens = parseStreamingMarkdown(full.substring(0, len))
+            if (len >= 7) {
+                assertTrue(tokens.first() is MdToken.ThinkBlock, "len=$len")
+            }
+        }
+        val finalBlock = parseStreamingMarkdown(full).single() as MdToken.ThinkBlock
+        assertEquals("thinking", finalBlock.content)
+        assertEquals(true, finalBlock.closed)
+    }
+
+    @Test
+    fun thinkBlock_notAtLineStart_isPlain() {
+        val tokens = parseStreamingMarkdown("text <think>thinking</think>")
+        assertTrue(tokens.none { it is MdToken.ThinkBlock })
+        assertTrue(tokens.any { it is MdToken.Plain && it.text.contains("<think>") })
+    }
 }

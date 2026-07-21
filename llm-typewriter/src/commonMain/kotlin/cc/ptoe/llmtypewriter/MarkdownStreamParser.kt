@@ -144,6 +144,16 @@ sealed class MdToken {
         val rows: List<List<String>>,
         val closed: Boolean,
     ) : MdToken()
+
+    /**
+     * A think block: `<think>...</think>`. [content] is the raw text between the tags.
+     * [closed] flips to `true` once the closing `</think>` is seen — until then the block
+     * is rendering progressively. Think blocks render as special collapsible quotes.
+     */
+    data class ThinkBlock(
+        val content: String,
+        val closed: Boolean,
+    ) : MdToken()
 }
 
 /** Per-column alignment for a [MdToken.Table], derived from the separator row's colons. */
@@ -192,6 +202,12 @@ internal fun parseStreamingMarkdown(input: String): List<MdToken> {
         // until the close fence is seen.
         if (atLineStart && i + 2 < len && input[i] == '`' && input[i + 1] == '`' && input[i + 2] == '`') {
             i = consumeCodeBlock(input, i, out)
+            atLineStart = false
+            continue
+        }
+
+        if (matchesAt(input, i, "<think>")) {
+            i = consumeThinkBlock(input, i, out)
             atLineStart = false
             continue
         }
@@ -424,6 +440,19 @@ private fun consumeFootnoteReference(input: String, start: Int, out: MutableList
     if (label.any { it.isWhitespace() }) return start
     out += MdToken.FootnoteReference(label)
     return close + 1
+}
+
+private fun consumeThinkBlock(input: String, start: Int, out: MutableList<MdToken>): Int {
+    val openLen = "<think>".length
+    var j = start + openLen
+    val close = input.indexOf("</think>", startIndex = j)
+    return if (close < 0) {
+        out += MdToken.ThinkBlock(input.substring(j), closed = false)
+        input.length
+    } else {
+        out += MdToken.ThinkBlock(input.substring(j, close), closed = true)
+        close + "</think>".length
+    }
 }
 
 private fun consumeFootnoteDefinitionIfAny(

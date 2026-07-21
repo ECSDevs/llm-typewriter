@@ -68,6 +68,12 @@ data class MarkdownStyles(
     val blockQuoteStripe: Color = Color.Unspecified,
     /** Background tint for markdown block quotes (`> quote`). */
     val blockQuoteBackground: Color = Color.Unspecified,
+    /** Stripe color for think blocks (`<think>...</think>`). */
+    val thinkBlockStripe: Color = Color.Unspecified,
+    /** Background tint for think blocks. */
+    val thinkBlockBackground: Color = Color.Unspecified,
+    /** Text color for think blocks. */
+    val thinkBlockText: Color = Color.Unspecified,
     /** Style for superscript footnote references such as `[^1]`. */
     val footnoteReference: SpanStyle = SpanStyle(),
     /** Color for compact footnote definitions rendered below the main content. */

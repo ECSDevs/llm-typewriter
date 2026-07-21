@@ -58,6 +58,9 @@ object LlmTypewriterDefaults {
         tableBackground = MaterialTheme.colorScheme.surfaceContainer,
         blockQuoteStripe = MaterialTheme.colorScheme.outlineVariant,
         blockQuoteBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        thinkBlockStripe = MaterialTheme.colorScheme.secondary,
+        thinkBlockBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        thinkBlockText = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 
     /** The same as [markdownStyles] but takes an explicit color scheme for testing. */
@@ -93,5 +96,8 @@ object LlmTypewriterDefaults {
         tableBackground = surfaceVariant, // M3: surfaceContainer
         blockQuoteStripe = outline,
         blockQuoteBackground = surfaceVariant.copy(alpha = 0.3f),
+        thinkBlockStripe = secondary,
+        thinkBlockBackground = surfaceVariant.copy(alpha = 0.5f),
+        thinkBlockText = onSurfaceVariant,
     )
 }

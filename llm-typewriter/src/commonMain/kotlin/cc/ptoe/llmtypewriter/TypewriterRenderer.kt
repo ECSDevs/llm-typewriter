@@ -1,5 +1,8 @@
 package cc.ptoe.llmtypewriter
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -17,7 +20,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.LocalContentColor
@@ -25,10 +30,17 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
@@ -123,6 +135,8 @@ internal sealed class MdBlock {
     /** GFM table — header row + aligned data rows, rendered as a bordered grid. */
     data class Table(val token: MdToken.Table) : MdBlock()
     data class Footnote(val token: MdToken.FootnoteDefinition) : MdBlock()
+    /** Think block `<think>...</think>` — rendered as a collapsible special quote. */
+    data class ThinkBlock(val token: MdToken.ThinkBlock) : MdBlock()
     /**
      * A list (ordered or unordered). Built from a run of [MdToken.ListItem] tokens via
      * [buildListBlock]. The first item's [startNumber] becomes the list's start number for
@@ -190,6 +204,7 @@ private fun planBlocks(tokens: List<MdToken>, styles: MarkdownStyles): List<MdBl
                 is MdToken.DisplayMath -> { blocks += MdBlock.DisplayMath(tok.content); continue }
                 is MdToken.Table -> { blocks += MdBlock.Table(tok); continue }
                 is MdToken.FootnoteDefinition -> { blocks += MdBlock.Footnote(tok); continue }
+                is MdToken.ThinkBlock -> { blocks += MdBlock.ThinkBlock(tok); continue }
                 else -> Unit
             }
         }
@@ -335,7 +350,7 @@ internal fun groupIntoParagraphs(tokens: List<MdToken>): List<List<MdToken>> {
                 current += tok
             }
             is MdToken.Heading, is MdToken.HorizontalRule, is MdToken.CodeBlock, is MdToken.DisplayMath, is MdToken.Image,
-            is MdToken.Table, is MdToken.FootnoteDefinition -> {
+            is MdToken.Table, is MdToken.FootnoteDefinition, is MdToken.ThinkBlock -> {
                 flush()
                 groups += mutableListOf(tok)
             }
@@ -347,7 +362,7 @@ internal fun groupIntoParagraphs(tokens: List<MdToken>): List<List<MdToken>> {
                 val nextIsBlock =
                     next is MdToken.Heading || next is MdToken.CodeBlock ||
                     next is MdToken.HorizontalRule || next is MdToken.DisplayMath || next is MdToken.Image || next is MdToken.Table ||
-                        next is MdToken.FootnoteDefinition
+                        next is MdToken.FootnoteDefinition || next is MdToken.ThinkBlock
                 val currentIsList = current.firstOrNull() is MdToken.ListItem
                 val currentIsQuote = current.firstOrNull() is MdToken.BlockQuote
                 val nextIsListItem = next is MdToken.ListItem
@@ -478,6 +493,7 @@ private fun RenderMarkdownStream(
                 is MdBlock.DisplayMath -> RenderDisplayMath(block.content, styles)
                 is MdBlock.Table -> RenderTable(block.token, styles)
                 is MdBlock.Footnote -> RenderFootnote(block.token, styles)
+                is MdBlock.ThinkBlock -> RenderThinkBlock(block.token, styles)
                 is MdBlock.ListBlock -> RenderList(block, styles, depth = 0)
             }
         }
@@ -1169,7 +1185,7 @@ private fun appendInlineTokens(
                     appendInlineTokens(this, tok.inline, styles)
                 }
                 is MdToken.CodeBlock, MdToken.Newline, MdToken.HorizontalRule -> { /* block-level */ }
-                is MdToken.ListItem, is MdToken.BlockQuote, is MdToken.Table, is MdToken.FootnoteDefinition -> {
+                is MdToken.ListItem, is MdToken.BlockQuote, is MdToken.Table, is MdToken.FootnoteDefinition, is MdToken.ThinkBlock -> {
                     /* block-level */
                 }
                 is MdToken.InlineMath -> append(tok.content)
@@ -1258,5 +1274,112 @@ internal fun codeBlockContentForDisplay(content: String, closed: Boolean): Strin
         content.endsWith("\r\n") -> content.dropLast(2)
         content.endsWith("\n") -> content.dropLast(1)
         else -> content
+    }
+}
+
+@Composable
+private fun RenderThinkBlock(token: MdToken.ThinkBlock, styles: MarkdownStyles) {
+    val stripeColor = styles.thinkBlockStripe.takeIf { it != Color.Unspecified }
+        ?: LocalContentColor.current.copy(alpha = 0.35f)
+    val backgroundColor = styles.thinkBlockBackground.takeIf { it != Color.Unspecified }
+        ?: Color.Transparent
+    val textColor = styles.thinkBlockText.takeIf { it != Color.Unspecified }
+        ?: LocalContentColor.current.copy(alpha = 0.72f)
+
+    val isClosed = token.closed
+    var isExpanded by remember { mutableStateOf(!isClosed) }
+
+    val displayContent = codeBlockContentForDisplay(token.content, token.closed)
+    val inlineTokens = remember(displayContent) { parseStreamingMarkdown(displayContent) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(backgroundColor),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(16.dp)
+                        .background(stripeColor, RoundedCornerShape(999.dp))
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "思考过程",
+                    style = LocalTextStyle.current.copy(
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = stripeColor,
+                    ),
+                )
+            }
+            if (isClosed) {
+                Text(
+                    text = if (isExpanded) "▲" else "▼",
+                    style = LocalTextStyle.current.copy(
+                        fontSize = 14.sp,
+                        color = stripeColor,
+                    ),
+                    modifier = Modifier
+                        .width(24.dp)
+                        .height(24.dp)
+                        .wrapContentSize(Alignment.Center)
+                        .clickable { isExpanded = !isExpanded },
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = isExpanded || !isClosed,
+            enter = expandVertically(),
+            exit = shrinkVertically(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .background(stripeColor, RoundedCornerShape(999.dp))
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 10.dp, end = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    ProvideTextStyle(LocalTextStyle.current.copy(color = textColor)) {
+                        if (inlineTokens.any { it is MdToken.Image }) {
+                            RenderInlineWithImages(inlineTokens, styles)
+                        } else if (inlineTokens.any { it is MdToken.InlineMath }) {
+                            RenderInlineRunWithMath(buildInlineSegments(inlineTokens, styles), styles)
+                        } else if (inlineTokens.any { it is MdToken.CodeBlock }) {
+                            for (tok in inlineTokens) {
+                                if (tok is MdToken.CodeBlock) {
+                                    RenderCodeBlock(tok, styles)
+                                } else {
+                                    RenderInlineText(listOf(tok), styles)
+                                }
+                            }
+                        } else {
+                            RenderInlineText(inlineTokens, styles)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
