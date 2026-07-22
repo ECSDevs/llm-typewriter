@@ -30,6 +30,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1288,6 +1289,14 @@ private fun RenderThinkBlock(token: MdToken.ThinkBlock, styles: MarkdownStyles) 
 
     val isClosed = token.closed
     var isExpanded by remember { mutableStateOf(!isClosed) }
+
+    // Auto-collapse when the think block transitions from open to closed
+    // (i.e. when </think> arrives or the stream is force-completed).
+    LaunchedEffect(isClosed) {
+        if (isClosed) {
+            isExpanded = false
+        }
+    }
 
     val displayContent = codeBlockContentForDisplay(token.content, token.closed)
     val inlineTokens = remember(displayContent) { parseStreamingMarkdown(displayContent) }
