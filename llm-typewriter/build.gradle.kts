@@ -58,6 +58,16 @@ kotlin {
         }
     }
 
+    // Desktop JVM target (Compose Multiplatform). Math rendering falls back to
+    // source-as-code text there (AndroidMath is Android-only).
+    jvm {
+        compilations.all {
+            compileTaskProvider.configure {
+                compilerOptions { jvmTarget.set(JvmTarget.JVM_11) }
+            }
+        }
+    }
+
     sourceSets {
         commonMain.dependencies {
             // These types are part of the public API and must be compile-scope dependencies in
@@ -88,6 +98,13 @@ kotlin {
                 implementation("com.github.gregcockroft:AndroidMath:v1.1.0") {
                     exclude(group = "com.google.guava", module = "listenablefuture")
                 }
+                implementation(libs.coil.network.okhttp)
+            }
+        }
+
+        // Desktop JVM — Coil needs a network fetcher on JVM too.
+        getByName("jvmMain") {
+            dependencies {
                 implementation(libs.coil.network.okhttp)
             }
         }
